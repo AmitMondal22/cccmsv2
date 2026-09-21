@@ -23,6 +23,25 @@ const Device = sequelize.define('Device', {
   // Configurable thresholds for offline detection
   offline_threshold_minutes: { type: DataTypes.INTEGER, defaultValue: 5 },
   warning_threshold_minutes: { type: DataTypes.INTEGER, defaultValue: 2 },
+  // Per-device LED fault detection thresholds (JSON)
+  fault_config: {
+    type: DataTypes.JSONB,
+    defaultValue: {
+      supply_voltage_min: 80,        // V — below this = no supply (FC-07)
+      open_circuit_current: 0.05,   // A — below this with lamp ON = FC-01
+      overcurrent_ratio: 1.30,      // × baseline — above this = FC-03
+      led_fault_lower_ratio: 0.30,  // × baseline — below this = FC-02
+      underpowered_upper_ratio: 0.80, // × baseline — FC-05 range upper bound
+      low_pf_threshold: 0.70,       // PF — below this = FC-04
+      baseline_learning_packets: 20, // samples before baseline is ready
+      baseline_pf_min: 0.75,        // min PF for a sample to be used in baseline
+      baseline_current_min: 0.10,   // A — min current for a sample to be used
+      debounce_count: 3,            // consecutive hits before alert is raised
+      cycling_spike_count: 3,       // spikes in window before FC-06
+      cycling_window_ms: 60000,     // ms — startup cycling detection window
+    },
+  },
+
 }, { tableName: 'devices' });
 
 export default Device;

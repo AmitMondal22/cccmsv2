@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   getDevice, getDeviceTelemetry, getDeviceDiagnostics,
-  controlDevice, pingDevice
+  controlDevice, pingDevice,
+  getFaultConfig, saveFaultConfig, restoreFaultDefaults, resetFaultBaseline,
 } from '../../api/device.api.js';
 import { getAlerts, acknowledgeAlert, resolveAlert } from '../../api/alert.api.js';
 import { getTickets, createTicket } from '../../api/maintenance.api.js';
@@ -26,7 +27,7 @@ function timeSince(date) {
   return `${Math.floor(s / 3600)}h ago`;
 }
 
-const TABS = ['Overview', 'Live Data', 'History', 'Alerts', 'Diagnostics', 'Maintenance'];
+const TABS = ['Overview', 'Live Data', 'History', 'Alerts', 'Diagnostics', 'Maintenance', 'Fault Config'];
 
 export default function DeviceDetail() {
   const { id } = useParams();
@@ -62,6 +63,12 @@ export default function DeviceDetail() {
     problem_type: 'lamp_fault',
   });
   const [savingTicket, setSavingTicket] = useState(false);
+
+  // Fault Config state
+  const [faultCfgData, setFaultCfgData] = useState(null);   // { defaults, effective, saved }
+  const [faultCfgEdit, setFaultCfgEdit] = useState({});     // local edits (overrides)
+  const [faultCfgSaving, setFaultCfgSaving] = useState(false);
+  const [faultCfgMsg, setFaultCfgMsg] = useState(null);     // { type: 'ok'|'err', text }
 
   // Fetch Device Core Data
   const fetchDevice = async () => {
@@ -116,13 +123,24 @@ export default function DeviceDetail() {
     }
   };
 
+  // Fetch Fault Config
+  const fetchFaultConfig = async () => {
+    try {
+      const res = await getFaultConfig(id);
+      setFaultCfgData(res.data);
+      setFaultCfgEdit(res.data?.saved || {});
+    } catch (e) { /* ignore */ }
+  };
+
   const loadAll = async () => {
+
     await Promise.all([
       fetchDevice(),
       fetchTelemetry(),
       fetchAlerts(),
       fetchTickets(),
       fetchDiagnostics(),
+      fetchFaultConfig(),
     ]);
     setLoading(false);
   };
@@ -811,6 +829,203 @@ export default function DeviceDetail() {
           </div>
         </div>
       )}
+
+      {/* ── TAB 7: FAULT CONFIG ── */}
+      {tab === 'Fault Config' && faultCfgData && (() => {
+        const { defaults, effective } = faultCfgData;
+
+        const FIELDS = [
+          {
+            group: 'Voltage & Current Thresholds',
+            color: '#38bdf8',
+            icon: '⚡',
+            items: [
+              { key: 'supply_voltage_min',    label: 'Min Supply Voltage (V)',        unit: 'V',   desc: 'Below this → FC-07 (No Supply)' },
+              { key: 'open_circuit_current',  label: 'Open Circuit Threshold (A)',    unit: 'A',   desc: 'Below this with lamp ON → FC-01' },
+              { key: 'overcurrent_ratio',     label: 'Overcurrent Ratio',             unit: '×',   desc: 'Above baseline × this → FC-03' },
+            ],
+          },
+          {
+            group: 'Baseline Comparison Ratios',
+            color: '#f97316',
+            icon: '📊',
+            items: [
+              { key: 'led_fault_lower_ratio',    label: 'LED Fault Lower Ratio',         unit: '×', desc: 'I < baseline × this → FC-02' },
+              { key: 'underpowered_upper_ratio',  label: 'Underpowered Upper Ratio',      unit: '×', desc: 'I between lower–upper → FC-05' },
+              { key: 'low_pf_threshold',          label: 'Low Power Factor Threshold',    unit: 'PF', desc: 'PF below this → FC-04' },
+            ],
+          },
+          {
+            group: 'Baseline Learning',
+            color: '#22c55e',
+            icon: '🎓',
+            items: [
+              { key: 'baseline_learning_packets', label: 'Baseline Learning Packets',  unit: 'n', desc: 'Stable ON-state packets needed to establish baseline' },
+              { key: 'baseline_pf_min',           label: 'Min PF for Baseline Sample', unit: 'PF', desc: 'Sample with PF below this is excluded from baseline' },
+              { key: 'baseline_current_min',      label: 'Min Current for Baseline',   unit: 'A',  desc: 'Noise floor — samples below this are excluded' },
+            ],
+          },
+          {
+            group: 'Debounce & Startup Cycling',
+            color: '#a855f7',
+            icon: '🔁',
+            items: [
+              { key: 'debounce_count',      label: 'Debounce Count',             unit: 'n',  desc: 'Consecutive matching samples before alert fires' },
+              { key: 'cycling_spike_count', label: 'Startup Cycling Spike Count',unit: 'n',  desc: 'Spikes in window before FC-06' },
+              { key: 'cycling_window_ms',   label: 'Cycling Detection Window',   unit: 'ms', desc: 'Time window for counting startup spikes (e.g. 60000 = 60s)' },
+            ],
+          },
+        ];
+
+        const handleSave = async () => {
+          setFaultCfgSaving(true);
+          setFaultCfgMsg(null);
+          try {
+            const res = await saveFaultConfig(id, faultCfgEdit);
+            setFaultCfgData(d => ({ ...d, saved: res.data.saved, effective: res.data.effective }));
+            setFaultCfgMsg({ type: 'ok', text: '✅ Fault thresholds saved successfully.' });
+          } catch (e) {
+            setFaultCfgMsg({ type: 'err', text: '❌ Failed to save thresholds.' });
+          }
+          setFaultCfgSaving(false);
+        };
+
+        const handleRestoreDefaults = async () => {
+          if (!confirm('Restore this device to system default thresholds?')) return;
+          try {
+            await restoreFaultDefaults(id);
+            await fetchFaultConfig();
+            setFaultCfgMsg({ type: 'ok', text: '✅ Restored to system defaults.' });
+          } catch (e) {
+            setFaultCfgMsg({ type: 'err', text: '❌ Failed to restore defaults.' });
+          }
+        };
+
+        const handleResetBaseline = async () => {
+          if (!confirm('Reset learned baseline current for this device? It will re-learn on next packets.')) return;
+          try {
+            const res = await resetFaultBaseline(id);
+            setFaultCfgMsg({ type: 'ok', text: `✅ ${res.data.message}` });
+          } catch (e) {
+            setFaultCfgMsg({ type: 'err', text: '❌ Failed to reset baseline.' });
+          }
+        };
+
+        return (
+          <div>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>⚙️ LED Fault Detection — Per-Device Thresholds</h2>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                  Customize fault detection sensitivity for <strong>{device.uid}</strong>. Empty fields inherit system defaults.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-secondary btn-sm" onClick={handleResetBaseline}>
+                  🔄 Reset Learned Baseline
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={handleRestoreDefaults}>
+                  ↩ Restore Defaults
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={faultCfgSaving}>
+                  {faultCfgSaving ? 'Saving…' : '💾 Save Thresholds'}
+                </button>
+              </div>
+            </div>
+
+            {/* Status Message */}
+            {faultCfgMsg && (
+              <div style={{
+                padding: '8px 14px', borderRadius: 8, marginBottom: 16, fontSize: 12, fontWeight: 600,
+                background: faultCfgMsg.type === 'ok' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
+                border: `1px solid ${faultCfgMsg.type === 'ok' ? '#22c55e' : '#ef4444'}`,
+                color: faultCfgMsg.type === 'ok' ? '#22c55e' : '#ef4444',
+              }}>
+                {faultCfgMsg.text}
+              </div>
+            )}
+
+            {/* Threshold Groups */}
+            {FIELDS.map(group => (
+              <div key={group.group} className="card" style={{ marginBottom: 16 }}>
+                <div className="card-header">
+                  <div className="card-title" style={{ color: group.color }}>
+                    {group.icon} {group.group}
+                  </div>
+                </div>
+                <div className="card-body" style={{ padding: '16px 20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+                    {group.items.map(f => {
+                      const hasOverride = faultCfgEdit[f.key] !== undefined && faultCfgEdit[f.key] !== '';
+                      return (
+                        <div key={f.key}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                            {f.label}
+                            {hasOverride && (
+                              <span style={{ marginLeft: 6, fontSize: 10, background: 'rgba(168,85,247,0.15)', color: '#a855f7', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>CUSTOM</span>
+                            )}
+                          </label>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <input
+                              type="number"
+                              step="any"
+                              className="form-input"
+                              style={{ flex: 1 }}
+                              value={faultCfgEdit[f.key] ?? ''}
+                              placeholder={`Default: ${defaults[f.key]}`}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setFaultCfgEdit(prev => ({
+                                  ...prev,
+                                  [f.key]: val === '' ? undefined : parseFloat(val),
+                                }));
+                              }}
+                            />
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 30 }}>{f.unit}</span>
+                            {hasOverride && (
+                              <button
+                                title="Clear override (use default)"
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1 }}
+                                onClick={() => setFaultCfgEdit(prev => { const n = { ...prev }; delete n[f.key]; return n; })}
+                              >✕</button>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                            {f.desc} · Effective: <strong style={{ color: group.color }}>{effective[f.key]}{f.unit !== 'n' ? ` ${f.unit}` : ''}</strong>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {/* Current Effective Config Summary */}
+            <div className="card">
+              <div className="card-header"><div className="card-title">📋 Current Effective Configuration</div></div>
+              <div className="card-body" style={{ padding: '16px 20px' }}>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
+                  These are the actual thresholds currently being used by the fault detection engine for this device.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+                  {Object.entries(effective).map(([key, val]) => (
+                    <div key={key} style={{
+                      padding: '8px 12px', borderRadius: 8,
+                      background: faultCfgEdit[key] !== undefined ? 'rgba(168,85,247,0.08)' : 'var(--bg-secondary)',
+                      border: `1px solid ${faultCfgEdit[key] !== undefined ? 'rgba(168,85,247,0.3)' : 'var(--border)'}`,
+                    }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{key}</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: faultCfgEdit[key] !== undefined ? '#a855f7' : 'var(--text-primary)' }}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Create Ticket Modal ── */}
       <Modal

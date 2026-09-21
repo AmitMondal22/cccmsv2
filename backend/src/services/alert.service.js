@@ -1,6 +1,7 @@
 import { Alert, AlertRule, Device, MaintenanceTicket, Notification, Street, Ward, Zone, City } from '../models/index.js';
 import { sendAlertEmail } from './email.service.js';
 import { Op } from 'sequelize';
+import { evaluateLEDFaults } from './faultDetection.service.js';
 
 /**
  * Check if a rule applies to a specific device based on scope hierarchy
@@ -159,6 +160,92 @@ export async function evaluateAlertRules(device, telemetry) {
         console.log(`[Alert] Auto-recovered: ${rule.name} for ${device.uid}`);
       }
     }
+  }
+
+  // ── LED Intelligent Fault Detection (runs after rule-based evaluation) ──────
+  try {
+    const ledVerdict = evaluateLEDFaults(device, telemetry);
+
+    if (ledVerdict) {
+      if (ledVerdict.isRecovery) {
+        // Auto-recover any open LED fault alert for this device with that code
+        const openLedAlert = await Alert.findOne({
+          where: {
+            device_id: device.id,
+            alert_type: `led_fault_${ledVerdict.faultCode}`,
+            status: { [Op.in]: ['open', 'acknowledged', 'assigned', 'in_progress'] },
+          },
+        });
+        if (openLedAlert) {
+          await openLedAlert.update({
+            status: 'auto_recovered',
+            auto_recovered: true,
+            resolved_at: new Date(),
+            resolution_notes: `LED fault auto-recovered: ${ledVerdict.detail}`,
+          });
+          await Notification.create({
+            type: 'recovery',
+            title: `LED Fault Recovered [${ledVerdict.faultCode}]`,
+            message: `${ledVerdict.faultCode} auto-recovered on ${device.uid} — normal operation restored`,
+            severity: 'info',
+            ref_type: 'alert',
+            ref_id: openLedAlert.id,
+          });
+          console.log(`[Alert] LED fault auto-recovered: ${ledVerdict.faultCode} for ${device.uid}`);
+        }
+      } else {
+        // Raise a new LED fault alert (only if not already open)
+        const existingLedAlert = await Alert.findOne({
+          where: {
+            device_id: device.id,
+            alert_type: `led_fault_${ledVerdict.faultCode}`,
+            status: { [Op.in]: ['open', 'acknowledged', 'assigned', 'in_progress'] },
+          },
+        });
+
+        if (!existingLedAlert) {
+          const ledAlert = await Alert.create({
+            device_id: device.id,
+            rule_id: null,
+            alert_type: `led_fault_${ledVerdict.faultCode}`,
+            severity: ledVerdict.severity,
+            status: 'open',
+            message: `[${ledVerdict.faultCode}] ${ledVerdict.faultName} on ${device.uid} (${device.name || ''}) — ${ledVerdict.detail}`,
+            voltage_at_alert: parseFloat(telemetry.voltage) || null,
+            current_at_alert: parseFloat(telemetry.current) || null,
+            power_at_alert: parseFloat(telemetry.real_power) || null,
+            detected_at: new Date(),
+          });
+
+          await Notification.create({
+            type: 'alert',
+            title: `LED Fault: ${ledVerdict.faultName} [${ledVerdict.faultCode}]`,
+            message: `${ledVerdict.faultCode} detected on ${device.uid} — ${ledVerdict.detail}`,
+            severity: ledVerdict.severity,
+            ref_type: 'alert',
+            ref_id: ledAlert.id,
+          });
+
+          // Auto-create maintenance ticket for critical LED faults
+          if (ledVerdict.severity === 'critical' || ledVerdict.severity === 'major') {
+            await MaintenanceTicket.create({
+              ticket_number: `TKT-LED-${Date.now()}`,
+              device_id: device.id,
+              alert_id: ledAlert.id,
+              title: `Auto: ${ledVerdict.faultCode} — ${ledVerdict.faultName} on ${device.uid}`,
+              description: `LED fault automatically detected.\nFault Code: ${ledVerdict.faultCode}\nCategory: ${ledVerdict.faultName}\nDetail: ${ledVerdict.detail}`,
+              problem_type: 'fault',
+              priority: ledVerdict.severity === 'critical' ? 'critical' : 'high',
+              status: 'open',
+            });
+          }
+
+          console.log(`[Alert] LED fault raised: ${ledVerdict.faultCode} (${ledVerdict.severity}) for ${device.uid}`);
+        }
+      }
+    }
+  } catch (ledErr) {
+    console.error(`[LED FAULT ENGINE ERROR]: ${ledErr.message}`);
   }
 }
 

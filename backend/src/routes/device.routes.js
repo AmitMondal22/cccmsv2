@@ -1,5 +1,6 @@
 import { Device, DeviceLatestState, Telemetry, Alert, MaintenanceTicket, Street, Ward, Zone, City, Project } from '../models/index.js';
 import { Op, fn, col, literal } from 'sequelize';
+import { getResolvedConfig, getSystemDefaults, resetDeviceFaultState } from '../services/faultDetection.service.js';
 
 export default async function deviceRoutes(fastify, opts) {
   // GET /api/devices — list with filters
@@ -370,4 +371,50 @@ export default async function deviceRoutes(fastify, opts) {
     await device.update({ status: 'decommissioned' });
     return { success: true };
   });
+
+  // GET /api/devices/:id/fault-config — return current effective thresholds for a device
+  fastify.get('/:id/fault-config', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const device = await Device.findByPk(request.params.id);
+    if (!device) return reply.status(404).send({ error: 'Device not found' });
+
+    const defaults = getSystemDefaults();
+    const effective = getResolvedConfig(device.fault_config);
+    const saved = device.fault_config || {};
+
+    return { defaults, effective, saved };
+  });
+
+  // PUT /api/devices/:id/fault-config — save per-device threshold overrides
+  fastify.put('/:id/fault-config', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const device = await Device.findByPk(request.params.id);
+    if (!device) return reply.status(404).send({ error: 'Device not found' });
+
+    // Merge new config over existing saved values
+    const currentSaved = device.fault_config || {};
+    const newConfig = { ...currentSaved, ...request.body };
+
+    await device.update({ fault_config: newConfig });
+
+    const effective = getResolvedConfig(newConfig);
+    return { success: true, saved: newConfig, effective };
+  });
+
+  // DELETE /api/devices/:id/fault-config — restore device to system defaults
+  fastify.delete('/:id/fault-config', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const device = await Device.findByPk(request.params.id);
+    if (!device) return reply.status(404).send({ error: 'Device not found' });
+
+    await device.update({ fault_config: {} });
+    return { success: true, effective: getSystemDefaults(), message: 'Restored to system defaults' };
+  });
+
+  // POST /api/devices/:id/fault-config/reset-baseline — wipe in-memory baseline
+  fastify.post('/:id/fault-config/reset-baseline', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const device = await Device.findByPk(request.params.id);
+    if (!device) return reply.status(404).send({ error: 'Device not found' });
+
+    resetDeviceFaultState(device.uid);
+    return { success: true, message: `Baseline reset for device ${device.uid}. Re-learning will begin on next packet.` };
+  });
 }
+
