@@ -100,16 +100,49 @@ export default async function deviceRoutes(fastify, opts) {
   fastify.get('/:id/telemetry', { preHandler: [fastify.authenticate] }, async (request) => {
     const { id } = request.params;
     const { from, to, limit = 100 } = request.query;
-    const where = { device_id: id };
+
+    const isNum = !isNaN(id);
+    let deviceId = isNum ? parseInt(id) : null;
+    let deviceUid = !isNum ? id : null;
+
+    if (!isNum) {
+      const dev = await Device.findOne({ where: { uid: id }, attributes: ['id', 'uid'] });
+      if (dev) {
+        deviceId = dev.id;
+        deviceUid = dev.uid;
+      }
+    } else {
+      const dev = await Device.findByPk(deviceId, { attributes: ['id', 'uid'] });
+      if (dev) {
+        deviceUid = dev.uid;
+      }
+    }
+
+    const where = {};
+    if (deviceId && deviceUid) {
+      where[Op.or] = [{ device_id: deviceId }, { uid: deviceUid }];
+    } else if (deviceId) {
+      where.device_id = deviceId;
+    } else if (deviceUid) {
+      where.uid = deviceUid;
+    }
+
     if (from || to) {
       where.server_timestamp = {};
-      if (from) where.server_timestamp[Op.gte] = new Date(from);
-      if (to) where.server_timestamp[Op.lte] = new Date(to);
+      if (from) {
+        const fromDate = from.includes('T') ? new Date(from) : new Date(`${from}T00:00:00.000Z`);
+        where.server_timestamp[Op.gte] = fromDate;
+      }
+      if (to) {
+        const toDate = to.includes('T') ? new Date(to) : new Date(`${to}T23:59:59.999Z`);
+        where.server_timestamp[Op.lte] = toDate;
+      }
     }
+
     const records = await Telemetry.findAll({
       where,
       order: [['server_timestamp', 'DESC']],
-      limit: parseInt(limit),
+      limit: Math.min(parseInt(limit) || 100, 500),
     });
     return records;
   });
