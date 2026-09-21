@@ -8,15 +8,13 @@ import { getAlerts, acknowledgeAlert, resolveAlert } from '../../api/alert.api.j
 import { getTickets, createTicket } from '../../api/maintenance.api.js';
 import StatusBadge from '../../components/common/StatusBadge.jsx';
 import Modal from '../../components/common/Modal.jsx';
-import { formatISTDateTime, formatISTDate, formatISTTime } from '../../utils/date.js';
 import {
   ArrowLeft, RefreshCw, Power, Zap, Activity, ShieldAlert,
   Wrench, CheckCircle2, Clock, Globe, MapPin, Download,
-  Calendar, FileText, AlertTriangle, Plus, Eye, Radio, Sparkles,
-  TrendingUp, BarChart2, Layers, Cpu, Database, Filter, Code2
+  Calendar, FileText, AlertTriangle, Plus, Eye, Radio, Sparkles
 } from 'lucide-react';
 import {
-  LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 
@@ -54,7 +52,6 @@ export default function DeviceDetail() {
   const [histFrom, setHistFrom] = useState(last7);
   const [histTo, setHistTo] = useState(today);
   const [histPreset, setHistPreset] = useState('last7');
-  const [selectedPayload, setSelectedPayload] = useState(null);
 
   // Create Ticket Modal
   const [ticketModal, setTicketModal] = useState(false);
@@ -79,11 +76,11 @@ export default function DeviceDetail() {
   // Fetch Telemetry History
   const fetchTelemetry = async (from = histFrom, to = histTo) => {
     try {
-      const params = { limit: 200 };
-      if (from) params.from = from;
-      if (to) params.to = to;
-      const res = await getDeviceTelemetry(id, params);
-      setTelemetry((res.data || []).reverse());
+      const res = await getDeviceTelemetry(id, { from, to, limit: 200 });
+      const records = Array.isArray(res.data) ? res.data : [];
+      // Sort oldest to newest for chronological chart streaming
+      const sorted = [...records].sort((a, b) => new Date(a.server_timestamp || a.packet_timestamp) - new Date(b.server_timestamp || b.packet_timestamp));
+      setTelemetry(sorted);
     } catch (e) {
       console.error(e);
     }
@@ -186,17 +183,15 @@ export default function DeviceDetail() {
       from = t;
       to = t;
     } else if (preset === 'yesterday') {
-      from = new Date(now - 864e5).toISOString().split('T')[0];
-      to = from;
+      const y = new Date(now - 864e5).toISOString().split('T')[0];
+      from = y;
+      to = y;
     } else if (preset === 'last7') {
       from = new Date(now - 7 * 864e5).toISOString().split('T')[0];
       to = t;
     } else if (preset === 'last30') {
       from = new Date(now - 30 * 864e5).toISOString().split('T')[0];
       to = t;
-    } else if (preset === 'all') {
-      from = '';
-      to = '';
     }
     setHistFrom(from);
     setHistTo(to);
@@ -243,26 +238,26 @@ export default function DeviceDetail() {
       alert('No telemetry records to export');
       return;
     }
-    const headers = ['Timestamp', 'UID', 'Voltage (V)', 'Current (A)', 'Power (W)', 'PF', 'Freq (Hz)', 'kWh', 'Run Hours', 'Light', 'Fault'];
-    const rows = telemetry.map(t => [
-      new Date(t.server_timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
-      t.uid,
-      t.voltage,
-      t.current,
-      t.real_power,
-      t.pf,
-      t.frequency,
-      t.kwh,
-      t.run_hours,
-      t.light_status === 1 ? 'ON' : 'OFF',
-      t.fault === 1 ? 'FAULT' : 'NORMAL',
+    const headers = ['Timestamp (IST)', 'UID', 'Voltage (V)', 'Current (A)', 'Power (W)', 'PF', 'Freq (Hz)', 'kWh', 'Run Hours', 'Light', 'Fault'];
+    const rows = [...telemetry].reverse().map(t => [
+      t.server_timestamp || t.packet_timestamp ? new Date(t.server_timestamp || t.packet_timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—',
+      t.uid || device?.uid || '',
+      t.voltage != null ? Number(t.voltage).toFixed(2) : '',
+      t.current != null ? Number(t.current).toFixed(3) : '',
+      t.real_power != null ? Number(t.real_power).toFixed(2) : '',
+      t.pf != null ? Number(t.pf).toFixed(2) : '',
+      t.frequency != null ? Number(t.frequency).toFixed(1) : '50.0',
+      t.kwh != null ? Number(t.kwh).toFixed(2) : '',
+      t.run_hours != null ? Number(t.run_hours).toFixed(1) : '',
+      t.light_status === 1 || t.light_status === 'on' || t.light_status === true ? 'ON' : 'OFF',
+      t.fault === 1 || t.fault === true ? 'FAULT' : 'NORMAL',
     ]);
-    const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const csvContent = [headers.join(','), ...rows.map(e => e.join(',')).join('\n')].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `${device?.uid || 'device'}_telemetry_${today}.csv`);
+    link.setAttribute('download', `${device?.uid || 'device'}_telemetry_${histFrom}_to_${histTo}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -271,40 +266,22 @@ export default function DeviceDetail() {
   if (loading) return <div className="loading-spinner"><div className="spinner" /> Loading device data...</div>;
   if (!device) return <div className="empty-state">Device not found</div>;
 
-  // Historical Summary Metrics
-  const histSummary = useMemo(() => {
-    if (!telemetry || telemetry.length === 0) return null;
-    const n = telemetry.length;
-    const sumV = telemetry.reduce((acc, t) => acc + (parseFloat(t.voltage) || 0), 0);
-    const avgV = (sumV / n).toFixed(1);
-    const peakI = Math.max(...telemetry.map(t => parseFloat(t.current) || 0)).toFixed(2);
-    const peakP = Math.max(...telemetry.map(t => parseFloat(t.real_power) || 0)).toFixed(1);
-    const avgPf = (telemetry.reduce((acc, t) => acc + (parseFloat(t.pf) || 0), 0) / n).toFixed(2);
-    const latestKwh = parseFloat(telemetry[telemetry.length - 1]?.kwh || 0).toFixed(2);
-    const totalRunHours = parseFloat(telemetry[telemetry.length - 1]?.run_hours || 0).toFixed(1);
+  const s = device.latestState;
+  const streetPath = [
+    device.street?.ward?.zone?.city?.name,
+    device.street?.ward?.zone?.name,
+    device.street?.ward?.name,
+    device.street?.name,
+  ].filter(Boolean).join(' / ');
 
-    return { n, avgV, peakI, peakP, avgPf, latestKwh, totalRunHours };
-  }, [telemetry]);
+  const chartData = telemetry.map(t => ({
+    time: new Date(t.server_timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+    Voltage: parseFloat(t.voltage) || 0,
+    Current: parseFloat(t.current) || 0,
+    Power: parseFloat(t.real_power) || 0,
+  }));
 
-  const histChartData = useMemo(() => {
-    return telemetry.map(t => {
-      const d = new Date(t.server_timestamp || t.packet_timestamp || t.created_at);
-      const timeLabel = isNaN(d.getTime())
-        ? '—'
-        : d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
-      return {
-        time: timeLabel,
-        Voltage: parseFloat(t.voltage) || 0,
-        Current: parseFloat(t.current) || 0,
-        Power: parseFloat(t.real_power) || 0,
-        Energy: parseFloat(t.kwh) || 0,
-        PF: parseFloat(t.pf) || 0,
-        RunHours: parseFloat(t.run_hours) || 0,
-      };
-    });
-  }, [telemetry]);
-
-  const isLightOn = device?.light_status === 'on';
+  const isLightOn = device.light_status === 'on';
 
   return (
     <div>
@@ -565,288 +542,71 @@ export default function DeviceDetail() {
       {tab === 'History' && (
         <div>
           {/* Date Range Selector & Export Controls */}
-          <div className="card" style={{ padding: '16px 20px', marginBottom: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
-              {/* Presets */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginRight: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Filter size={13} /> Range:
-                </span>
-                {[
-                  { id: 'today', label: 'Today' },
-                  { id: 'yesterday', label: 'Yesterday' },
-                  { id: 'last7', label: 'Last 7 Days' },
-                  { id: 'last30', label: 'Last 30 Days' },
-                  { id: 'all', label: 'All Time' },
-                ].map(p => (
-                  <button
-                    key={p.id}
-                    className={`btn btn-sm ${histPreset === p.id ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => applyHistPreset(p.id)}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Custom Date Pickers */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>From</span>
-                  <input
-                    type="date"
-                    className="form-input"
-                    style={{ padding: '4px 10px', fontSize: 12, width: 135 }}
-                    value={histFrom}
-                    onChange={e => {
-                      setHistFrom(e.target.value);
-                      setHistPreset('custom');
-                    }}
-                  />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>To</span>
-                  <input
-                    type="date"
-                    className="form-input"
-                    style={{ padding: '4px 10px', fontSize: 12, width: 135 }}
-                    value={histTo}
-                    onChange={e => {
-                      setHistTo(e.target.value);
-                      setHistPreset('custom');
-                    }}
-                  />
-                </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {['today', 'yesterday', 'last7', 'last30'].map(p => (
                 <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => fetchTelemetry(histFrom, histTo)}
+                  key={p}
+                  className={`btn btn-sm ${histPreset === p ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => applyHistPreset(p)}
                 >
-                  <RefreshCw size={12} /> Apply
+                  {p === 'today' ? 'Today' : p === 'yesterday' ? 'Yesterday' : p === 'last7' ? 'Last 7 Days' : 'Last 30 Days'}
                 </button>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={exportHistoryCSV}
-                  title="Export telemetry records to CSV"
-                >
-                  <Download size={12} /> Export CSV
-                </button>
-              </div>
+              ))}
             </div>
+
+            <button className="btn btn-primary btn-sm" onClick={exportHistoryCSV}>
+              <Download size={13} /> Export Historical CSV
+            </button>
           </div>
-
-          {/* Historical Summary Metric Cards */}
-          {histSummary && (
-            <div className="kpi-grid" style={{ marginBottom: 20 }}>
-              <div className="kpi-card">
-                <div className="kpi-card-icon" style={{ background: 'rgba(79,142,247,0.12)', color: '#4f8ef7' }}>
-                  <Database size={18} />
-                </div>
-                <div className="kpi-card-value">{histSummary.n}</div>
-                <div className="kpi-card-label">Logged Data Points</div>
-                <div className="kpi-card-sub">Packets in selected window</div>
-              </div>
-
-              <div className="kpi-card">
-                <div className="kpi-card-icon" style={{ background: 'rgba(56,189,248,0.12)', color: '#38bdf8' }}>
-                  <Zap size={18} />
-                </div>
-                <div className="kpi-card-value" style={{ color: '#38bdf8' }}>
-                  {histSummary.avgV} <span style={{ fontSize: 13 }}>V</span>
-                </div>
-                <div className="kpi-card-label">Average Voltage</div>
-                <div className="kpi-card-sub" style={{ color: '#22c55e' }}>Peak Current: {histSummary.peakI} A</div>
-              </div>
-
-              <div className="kpi-card">
-                <div className="kpi-card-icon" style={{ background: 'rgba(249,115,22,0.12)', color: '#f97316' }}>
-                  <Activity size={18} />
-                </div>
-                <div className="kpi-card-value" style={{ color: '#f97316' }}>
-                  {histSummary.peakP} <span style={{ fontSize: 13 }}>W</span>
-                </div>
-                <div className="kpi-card-label">Peak Active Power</div>
-                <div className="kpi-card-sub">Avg PF: {histSummary.avgPf}</div>
-              </div>
-
-              <div className="kpi-card">
-                <div className="kpi-card-icon" style={{ background: 'rgba(168,85,247,0.12)', color: '#a855f7' }}>
-                  <TrendingUp size={18} />
-                </div>
-                <div className="kpi-card-value" style={{ color: '#a855f7' }}>
-                  {histSummary.latestKwh} <span style={{ fontSize: 13 }}>kWh</span>
-                </div>
-                <div className="kpi-card-label">Cumulative Energy</div>
-                <div className="kpi-card-sub">Burn Hours: {histSummary.totalRunHours} h</div>
-              </div>
-            </div>
-          )}
-
-          {/* Historical Trend Charts */}
-          {histChartData.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-              {/* Chart 1: Electrical Parameters */}
-              <div className="card">
-                <div className="card-header">
-                  <div>
-                    <div className="card-title">Historical Electrical Parameters</div>
-                    <div className="card-subtitle">Voltage (V), Current (A), and Active Power (W) trend</div>
-                  </div>
-                </div>
-                <div style={{ padding: '16px 20px' }}>
-                  <ResponsiveContainer width="100%" height={260}>
-                    <LineChart data={histChartData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} />
-                      <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} interval="preserveStartEnd" />
-                      <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
-                      <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
-                      <Legend wrapperStyle={{ fontSize: 11, color: 'var(--text-secondary)', paddingTop: 6 }} />
-                      <Line type="monotone" dataKey="Voltage" name="Voltage (V)" stroke="#38bdf8" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="Current" name="Current (A)" stroke="#22c55e" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="Power" name="Active Power (W)" stroke="#f97316" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Chart 2: Energy & Burn Hours */}
-              <div className="card">
-                <div className="card-header">
-                  <div>
-                    <div className="card-title">Historical Energy & Burn Hours Progression</div>
-                    <div className="card-subtitle">Cumulative kWh energy and operating hours</div>
-                  </div>
-                </div>
-                <div style={{ padding: '16px 20px' }}>
-                  <ResponsiveContainer width="100%" height={260}>
-                    <AreaChart data={histChartData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
-                      <defs>
-                        <linearGradient id="histKwhGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#a855f7" stopOpacity={0.35} />
-                          <stop offset="95%" stopColor="#a855f7" stopOpacity={0.0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} />
-                      <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} interval="preserveStartEnd" />
-                      <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
-                      <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
-                      <Legend wrapperStyle={{ fontSize: 11, color: 'var(--text-secondary)', paddingTop: 6 }} />
-                      <Area type="monotone" dataKey="Energy" name="Cumulative Energy (kWh)" stroke="#a855f7" fill="url(#histKwhGrad)" strokeWidth={2} />
-                      <Line type="monotone" dataKey="RunHours" name="Burn Hours (h)" stroke="#ec4899" strokeWidth={1.5} dot={false} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Historical Telemetry Table */}
           <div className="card">
             <div className="card-header">
-              <div>
-                <div className="card-title">Historical Telemetry Log ({telemetry.length} data points)</div>
-                <div className="card-subtitle">Chronological record of UDP telemetry datagrams received for UID {device.uid}</div>
-              </div>
-              <span className="badge badge-online">{telemetry.length} Records</span>
+              <div className="card-title">Historical Telemetry Log ({telemetry.length} data points)</div>
             </div>
 
             <div className="data-table-wrap">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>#</th>
-                    <th>Timestamp (IST)</th>
+                    <th>Timestamp</th>
                     <th>Voltage (V)</th>
                     <th>Current (A)</th>
                     <th>Real Power (W)</th>
                     <th>Power Factor</th>
                     <th>Energy (kWh)</th>
-                    <th>Freq (Hz)</th>
+                    <th>Frequency (Hz)</th>
                     <th>Burn Hours</th>
                     <th>Light Status</th>
-                    <th>Relay</th>
-                    <th>Hardware</th>
-                    <th>Inspect</th>
+                    <th>Fault</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[...telemetry].reverse().map((t, i) => {
-                    const ts = t.server_timestamp || t.packet_timestamp || t.created_at;
-                    const isLight = t.light_status === 1 || t.light_status === 'on' || t.light_status === true;
-                    const isRelayClosed = t.relay_status === 1 || t.relay_status === 'closed' || t.relay_status === true;
-                    const isFault = t.fault === 1 || t.fault === true || t.fault === 'fault';
-                    const pfVal = parseFloat(t.pf || 0);
-
-                    return (
-                      <tr key={t.id || i}>
-                        <td style={{ color: 'var(--text-muted)', fontSize: 11 }}>{i + 1}</td>
-                        <td style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                          {formatISTDateTime(ts)}
-                        </td>
-                        <td style={{ color: '#38bdf8', fontWeight: 600 }}>
-                          {t.voltage != null ? `${Number(t.voltage).toFixed(1)} V` : '—'}
-                        </td>
-                        <td style={{ color: '#22c55e', fontWeight: 600 }}>
-                          {t.current != null ? `${Number(t.current).toFixed(3)} A` : '—'}
-                        </td>
-                        <td style={{ color: '#f97316', fontWeight: 600 }}>
-                          {t.real_power != null ? `${Number(t.real_power).toFixed(1)} W` : '—'}
-                        </td>
-                        <td style={{
-                          fontWeight: 600,
-                          color: pfVal >= 0.85 ? '#22c55e' : pfVal > 0 ? '#f59e0b' : 'var(--text-muted)'
-                        }}>
-                          {t.pf != null ? Number(t.pf).toFixed(2) : '—'}
-                        </td>
-                        <td style={{ color: '#a855f7', fontWeight: 600 }}>
-                          {t.kwh != null ? `${Number(t.kwh).toFixed(2)}` : '—'}
-                        </td>
-                        <td style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-                          {t.frequency != null ? `${Number(t.frequency).toFixed(1)} Hz` : '50.0 Hz'}
-                        </td>
-                        <td style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-                          {t.run_hours != null ? `${Number(t.run_hours).toFixed(1)} h` : '—'}
-                        </td>
-                        <td>
-                          <StatusBadge value={isLight ? 'on' : 'off'} type="light" />
-                        </td>
-                        <td>
-                          <span style={{
-                            fontSize: 11,
-                            fontWeight: 600,
-                            padding: '2px 8px',
-                            borderRadius: 10,
-                            background: isRelayClosed ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.12)',
-                            color: isRelayClosed ? '#22c55e' : 'var(--text-muted)',
-                          }}>
-                            {isRelayClosed ? 'Closed' : 'Open'}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={`badge ${isFault ? 'badge-fault' : 'badge-online'}`}>
-                            {isFault ? 'FAULT' : 'OK'}
-                          </span>
-                        </td>
-                        <td>
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            style={{ padding: '2px 6px', fontSize: 11 }}
-                            onClick={() => setSelectedPayload(t)}
-                            title="Inspect Raw Telemetry Datagram"
-                          >
-                            <Code2 size={12} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {telemetry.length === 0 && (
-                    <tr>
-                      <td colSpan={13} style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>
-                        <Database size={28} style={{ opacity: 0.3, display: 'block', margin: '0 auto 10px' }} />
-                        <div>No historical telemetry records found for UID <strong>{device.uid}</strong> in this date range.</div>
-                        <div style={{ fontSize: 11, marginTop: 4, opacity: 0.8 }}>Try selecting "All Time" or widening the date filter range above.</div>
+                  {[...telemetry].reverse().map((t, i) => (
+                    <tr key={i}>
+                      <td style={{ fontSize: 12 }}>
+                        {t.server_timestamp || t.packet_timestamp
+                          ? new Date(t.server_timestamp || t.packet_timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+                          : '—'}
+                      </td>
+                      <td style={{ color: '#38bdf8', fontWeight: 600 }}>{t.voltage != null ? `${Number(t.voltage).toFixed(1)} V` : '—'}</td>
+                      <td style={{ color: '#22c55e', fontWeight: 600 }}>{t.current != null ? `${Number(t.current).toFixed(3)} A` : '—'}</td>
+                      <td style={{ color: '#f97316', fontWeight: 600 }}>{t.real_power != null ? `${Number(t.real_power).toFixed(1)} W` : '—'}</td>
+                      <td className="dim">{t.pf != null ? Number(t.pf).toFixed(2) : '—'}</td>
+                      <td style={{ color: '#a855f7', fontWeight: 600 }}>{t.kwh != null ? `${Number(t.kwh).toFixed(2)}` : '—'}</td>
+                      <td className="dim">{t.frequency != null ? `${Number(t.frequency).toFixed(1)} Hz` : '50.0 Hz'}</td>
+                      <td className="dim">{t.run_hours != null ? `${Number(t.run_hours).toFixed(1)} h` : '—'}</td>
+                      <td><StatusBadge value={t.light_status === 1 || t.light_status === 'on' || t.light_status === true ? 'on' : 'off'} type="light" /></td>
+                      <td>
+                        <span className={`badge ${t.fault === 1 || t.fault === true ? 'badge-fault' : 'badge-online'}`}>
+                          {t.fault === 1 || t.fault === true ? 'FAULT' : 'OK'}
+                        </span>
                       </td>
                     </tr>
+                  ))}
+                  {telemetry.length === 0 && (
+                    <tr><td colSpan={10} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>No historical telemetry records for this date range</td></tr>
                   )}
                 </tbody>
               </table>
@@ -1116,50 +876,6 @@ export default function DeviceDetail() {
           />
         </div>
       </Modal>
-
-      {/* ── Inspect Raw Payload Modal ── */}
-      {selectedPayload && (
-        <Modal
-          title={`Telemetry Datagram Packet — ${selectedPayload.uid}`}
-          open={Boolean(selectedPayload)}
-          onClose={() => setSelectedPayload(null)}
-          footer={
-            <button className="btn btn-secondary" onClick={() => setSelectedPayload(null)}>
-              Close
-            </button>
-          }
-        >
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
-              Timestamp: <strong>{formatISTDateTime(selectedPayload.server_timestamp || selectedPayload.packet_timestamp)}</strong>
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-              Source IP: <code>{selectedPayload.source_ip || 'UDP Stream'}</code>
-            </div>
-          </div>
-
-          <div style={{
-            background: 'var(--bg-main)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--r-md)',
-            padding: 14,
-            fontFamily: 'monospace',
-            fontSize: 12,
-            maxHeight: 320,
-            overflowY: 'auto',
-            color: 'var(--brand)',
-            whiteSpace: 'pre-wrap',
-          }}>
-            {JSON.stringify(
-              selectedPayload.raw_payload
-                ? (typeof selectedPayload.raw_payload === 'string' ? JSON.parse(selectedPayload.raw_payload) : selectedPayload.raw_payload)
-                : selectedPayload,
-              null,
-              2
-            )}
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }
