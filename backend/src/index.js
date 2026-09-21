@@ -30,8 +30,15 @@ const fastify = Fastify({
 
 // ── Plugins ──────────────────────────────────────────────────────
 await fastify.register(cors, {
-  origin: [process.env.FRONTEND_URL || 'http://localhost:5173', 'http://localhost:3000'],
+  origin: (origin, cb) => {
+    // Allow all origins (reflect requesting origin to support credentials: true)
+    cb(null, true);
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Request-Method', 'Access-Control-Request-Headers'],
+  exposedHeaders: ['*'],
+  maxAge: 86400,
 });
 
 await fastify.register(jwt, {
