@@ -4,33 +4,43 @@ dotenv.config();
 import { Device, DeviceLatestState, Telemetry } from '../models/index.js';
 import { evaluateAlertRules } from '../services/alert.service.js';
 
-const UDP_PORT = parseInt(process.env.UDP_PORT) || 9000;
+const UDP_PORT = parseInt(process.env.UDP_PORT) || 9001;
 
 // Map to track last connectivity check per device
 const deviceCache = new Map();
 
 export function startUDPServer() {
-  // Create dual-stack UDP4 server (use udp6 for pure IPv6)
   const server = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
   server.on('error', (err) => {
-    console.error('[UDP] Server error:', err.message);
+    console.error(`\n🚨 [UDP SERVER ERROR] ${new Date().toISOString()}:`, err.message);
   });
 
   server.on('message', async (msg, rinfo) => {
-    let raw;
+    const raw = msg.toString('utf8');
+    const timestamp = new Date().toISOString();
+
+    console.log(`\n📡 ════════════════ [UDP PACKET RECEIVED] ════════════════`);
+    console.log(`⏱️  Timestamp: ${timestamp}`);
+    console.log(`🌐 From:      ${rinfo.address}:${rinfo.port} (${rinfo.size} bytes)`);
+    console.log(`📄 Raw Data:  ${raw}`);
+
     try {
-      raw = msg.toString('utf8');
       const payload = JSON.parse(raw);
+      console.log(`📦 Parsed Payload:`, JSON.stringify(payload, null, 2));
+
       await processTelemetry(payload, rinfo, raw);
     } catch (err) {
-      console.error('[UDP] Processing error:', err.message, '| Raw:', raw?.substring(0, 100));
+      console.error(`❌ [UDP PARSE/PROCESS ERROR]: ${err.message}`);
+      console.error(`   Raw Content: ${raw}`);
     }
+    console.log(`═══════════════════════════════════════════════════════════\n`);
   });
 
   server.on('listening', () => {
     const addr = server.address();
-    console.log(`✅ UDP Telemetry server listening on ${addr.address}:${addr.port}`);
+    console.log(`\n🚀 [UDP SERVER READY] Listening for telemetry on ${addr.address}:${addr.port}`);
+    console.log(`💡 Expected JSON Format: {"UID":"TS00000001","VOLTAGE":238.5,"CURRENT":0.26,"REALPOWER":62.0,"PF":0.94,"KWH":14.85,"RUNHR":48.5,"FREQ":50.0,"LIGHT_STATUS":1,"FAULT":0}\n`);
   });
 
   server.bind(UDP_PORT, '0.0.0.0');
@@ -40,7 +50,7 @@ export function startUDPServer() {
 async function processTelemetry(payload, rinfo, raw) {
   // 1. Validate required fields
   if (!payload.UID) {
-    console.warn('[UDP] Missing UID in payload');
+    console.warn(`⚠️ [UDP REJECTED] Missing 'UID' field in telemetry payload`);
     return;
   }
 
@@ -49,7 +59,7 @@ async function processTelemetry(payload, rinfo, raw) {
   if (!device) {
     device = await Device.findOne({ where: { uid: payload.UID } });
     if (!device) {
-      console.warn(`[UDP] Unknown device UID: ${payload.UID}`);
+      console.warn(`⚠️ [UDP UNKNOWN DEVICE] Device UID '${payload.UID}' not registered in database!`);
       return;
     }
     deviceCache.set(payload.UID, device);
@@ -63,23 +73,21 @@ async function processTelemetry(payload, rinfo, raw) {
   if (payload.LIGHT_STATUS !== undefined) {
     lightStatus = parseInt(payload.LIGHT_STATUS);
   } else {
-    // Infer from current — configurable, mark as inferred
     lightStatus = (parseFloat(payload.CURRENT) || 0) > 0.05 ? 1 : 0;
   }
 
-  // 4. Determine connectivity status from device thresholds
-  const connectivityStatus = 'online'; // just received telemetry = online
+  const connectivityStatus = 'online';
 
-  // 5. Update Device.last_seen + statuses
+  // 4. Update Device.last_seen + statuses
   await Device.update({
     last_seen: now,
     connectivity_status: connectivityStatus,
     light_status: lightStatus === 1 ? 'on' : 'off',
-    health_status: payload.FAULT === 1 ? 'fault' : 'normal',
+    health_status: parseInt(payload.FAULT) === 1 ? 'fault' : 'normal',
   }, { where: { id: device.id } });
 
-  // 6. Upsert DeviceLatestState
-  const [state, created] = await DeviceLatestState.findOrCreate({
+  // 5. Upsert DeviceLatestState
+  const [state] = await DeviceLatestState.findOrCreate({
     where: { device_id: device.id },
     defaults: { device_id: device.id },
   });
@@ -87,57 +95,80 @@ async function processTelemetry(payload, rinfo, raw) {
   const prevPacketsToday = state.packets_today || 0;
   const prevPacketsTotal = state.packets_total || 0;
 
+  const voltage = parseFloat(payload.VOLTAGE) || 0;
+  const current = parseFloat(payload.CURRENT) || 0;
+  const realPower = parseFloat(payload.REALPOWER) || (voltage * current);
+  const pf = parseFloat(payload.PF) || (lightStatus === 1 ? 0.92 : 0);
+  const kwh = parseFloat(payload.KWH) || state.kwh || 0;
+  const runHours = parseFloat(payload.RUNHR) || state.run_hours || 0;
+  const frequency = parseFloat(payload.FREQ) || 50.0;
+  const fault = parseInt(payload.FAULT) || 0;
+  const relayStatus = payload.RELAY_STATUS !== undefined ? parseInt(payload.RELAY_STATUS) : lightStatus;
+
   await state.update({
-    voltage: parseFloat(payload.VOLTAGE) || 0,
-    current: parseFloat(payload.CURRENT) || 0,
-    real_power: parseFloat(payload.REALPOWER) || 0,
-    pf: parseFloat(payload.PF) || 0,
-    kwh: parseFloat(payload.KWH) || 0,
-    run_hours: parseFloat(payload.RUNHR) || 0,
-    frequency: parseFloat(payload.FREQ) || 50,
+    voltage,
+    current,
+    real_power: realPower,
+    pf,
+    kwh,
+    run_hours: runHours,
+    frequency,
     light_status: lightStatus,
-    relay_status: parseInt(payload.RELAY_STATUS) || lightStatus,
-    fault: parseInt(payload.FAULT) || 0,
+    relay_status: relayStatus,
+    fault,
     packet_timestamp: packetTs,
     server_timestamp: now,
     ipv6_address: rinfo.address,
     packets_today: prevPacketsToday + 1,
     packets_total: prevPacketsTotal + 1,
-    fault_count: (parseInt(payload.FAULT) || 0) === 1 ? (state.fault_count || 0) + 1 : (state.fault_count || 0),
-    last_fault_at: (parseInt(payload.FAULT) || 0) === 1 ? now : state.last_fault_at,
+    fault_count: fault === 1 ? (state.fault_count || 0) + 1 : (state.fault_count || 0),
+    last_fault_at: fault === 1 ? now : state.last_fault_at,
   });
 
-  // 7. Store Telemetry record
+  // 6. Store Telemetry record
   const telemetryRecord = await Telemetry.create({
     device_id: device.id,
     uid: payload.UID,
     packet_timestamp: packetTs,
     server_timestamp: now,
-    voltage: parseFloat(payload.VOLTAGE) || 0,
-    current: parseFloat(payload.CURRENT) || 0,
-    real_power: parseFloat(payload.REALPOWER) || 0,
-    pf: parseFloat(payload.PF) || 0,
-    kwh: parseFloat(payload.KWH) || 0,
-    run_hours: parseFloat(payload.RUNHR) || 0,
-    frequency: parseFloat(payload.FREQ) || 50,
+    voltage,
+    current,
+    real_power: realPower,
+    pf,
+    kwh,
+    run_hours: runHours,
+    frequency,
     light_status: lightStatus,
-    relay_status: parseInt(payload.RELAY_STATUS) || lightStatus,
-    fault: parseInt(payload.FAULT) || 0,
+    relay_status: relayStatus,
+    fault,
     datalog: parseInt(payload.DATALOG) || 0,
     source_ip: rinfo.address,
     raw_payload: raw,
   });
 
-  // 8. Evaluate alert rules
+  // 7. Evaluate alert rules
+  let triggeredAlerts = [];
   try {
-    // Reload device with fresh data
     const freshDevice = await Device.findByPk(device.id);
-    await evaluateAlertRules(freshDevice, telemetryRecord);
+    triggeredAlerts = (await evaluateAlertRules(freshDevice, telemetryRecord)) || [];
   } catch (ruleErr) {
-    console.error('[UDP] Alert rule evaluation error:', ruleErr.message);
+    console.error(`⚠️ [UDP ALERT EVAL ERROR]:`, ruleErr.message);
   }
 
-  console.log(`[UDP] ✅ ${payload.UID} | V:${payload.VOLTAGE} I:${payload.CURRENT} P:${payload.REALPOWER} L:${lightStatus}`);
+  // 8. Detailed console logging
+  console.log(`✅ [UDP PROCESSED & SAVED IN DB]`);
+  console.log(`   🏷️  Device UID:    ${payload.UID} (${device.name})`);
+  console.log(`   ⚡ Voltage:       ${voltage.toFixed(2)} V`);
+  console.log(`   🔌 Current:       ${current.toFixed(4)} A`);
+  console.log(`   💡 Real Power:    ${realPower.toFixed(2)} W`);
+  console.log(`   📐 Power Factor:  ${pf.toFixed(2)}`);
+  console.log(`   🔋 Energy (kWh):  ${kwh.toFixed(4)} kWh`);
+  console.log(`   ⏱️  Run Hours:     ${runHours.toFixed(2)} hrs`);
+  console.log(`   💡 Light State:   ${lightStatus === 1 ? 'ON 🟢' : 'OFF ⚪'}`);
+  console.log(`   🛡️ Health Status: ${fault === 1 ? 'FAULT 🔴' : 'NORMAL 🟢'}`);
+  if (triggeredAlerts.length > 0) {
+    console.log(`   🔔 Alerts Created: ${triggeredAlerts.length} alert(s) triggered!`);
+  }
 }
 
 /**
@@ -167,16 +198,15 @@ export function startOfflineDetector() {
 
         if (newStatus !== device.connectivity_status) {
           await device.update({ connectivity_status: newStatus });
-          // Clear cache so next telemetry re-fetches fresh device
           deviceCache.delete(device.uid);
 
           if (newStatus === 'offline') {
-            console.log(`[Offline Detector] ${device.uid} is now OFFLINE (last seen: ${diffMin.toFixed(1)} min ago)`);
+            console.log(`⚠️ [OFFLINE DETECTOR] ${device.uid} (${device.name}) is now OFFLINE (last seen: ${diffMin.toFixed(1)} min ago)`);
           }
         }
       }
     } catch (err) {
-      console.error('[Offline Detector] Error:', err.message);
+      console.error('[OFFLINE DETECTOR ERROR]:', err.message);
     }
   }, 60 * 1000);
 }

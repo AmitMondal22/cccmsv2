@@ -41,7 +41,7 @@ export default function CommandCenter() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000);
+    const interval = setInterval(fetchData, 5000); // 5s live polling
     return () => clearInterval(interval);
   }, []);
 

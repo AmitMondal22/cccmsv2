@@ -113,7 +113,11 @@ export default function GISMonitoring() {
   const [mapZoom, setMapZoom] = useState(14);
   const [mapBounds, setMapBounds] = useState(null);
 
-  // Initial Load
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [lastSyncTime, setLastSyncTime] = useState(new Date());
+
+  // Initial Load & Silent Periodic Refresh
   const fetchHierarchy = async () => {
     try {
       const [cityRes, zoneRes, wardRes, streetRes] = await Promise.all([
@@ -131,21 +135,37 @@ export default function GISMonitoring() {
     }
   };
 
-  const fetchDevices = async () => {
-    setLoading(true);
+  const fetchDevices = async (silent = false) => {
+    if (!silent) setLoading(true);
+    setIsSyncing(true);
     try {
       const res = await getDevices({ limit: 500 });
-      setDevices(res.data.data || []);
+      const devList = res.data.data || [];
+      setDevices(devList);
+      setLastSyncTime(new Date());
     } catch (e) {
       console.error('Failed to fetch devices', e);
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
+    setTimeout(() => setIsSyncing(false), 500);
   };
 
   useEffect(() => {
     fetchHierarchy();
-    fetchDevices();
-  }, []);
+    fetchDevices(false);
+
+    let interval = null;
+    if (autoRefresh) {
+      interval = setInterval(() => {
+        fetchDevices(true);
+        fetchHierarchy();
+      }, 5000); // Live poll every 5s for auto-reflection of seed/database changes
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [autoRefresh]);
 
   // Filter Zones by selected City
   const filteredZones = useMemo(() => {
@@ -351,6 +371,34 @@ export default function GISMonitoring() {
             style={{ marginLeft: 6 }}
           >
             <MapPin size={13} /> {markerStyle === 'pins' ? 'Pin Markers' : 'Dot Markers'}
+          </button>
+
+          <button
+            className={`btn btn-sm ${autoRefresh ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setAutoRefresh(!autoRefresh)}
+            title="Toggle Real-Time Auto-Refresh (every 5s)"
+          >
+            <span style={{
+              display: 'inline-block',
+              width: 7,
+              height: 7,
+              borderRadius: '50%',
+              background: autoRefresh ? '#22c55e' : '#64748b',
+              boxShadow: autoRefresh ? '0 0 6px #22c55e' : 'none',
+              marginRight: 2
+            }} />
+            {autoRefresh ? 'Live Sync ON' : 'Live Sync OFF'}
+          </button>
+
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              fetchDevices(false);
+              fetchHierarchy();
+            }}
+            title="Force refresh data now"
+          >
+            <RefreshCw size={13} className={isSyncing ? 'spin' : ''} /> Refresh
           </button>
 
           <button
