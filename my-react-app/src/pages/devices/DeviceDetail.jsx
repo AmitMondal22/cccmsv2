@@ -1,10 +1,14 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   getDevice, getDeviceTelemetry, getDeviceDiagnostics,
   controlDevice, pingDevice,
   getFaultConfig, saveFaultConfig, restoreFaultDefaults, resetFaultBaseline,
 } from '../../api/device.api.js';
+import {
+  checkFotaUpdates, triggerSingleDeviceFota, uploadFirmwareBinary,
+  createFirmwareRelease, getFirmwareReleases
+} from '../../api/fota.api.js';
 import { getAlerts, acknowledgeAlert, resolveAlert } from '../../api/alert.api.js';
 import { getTickets, createTicket } from '../../api/maintenance.api.js';
 import StatusBadge from '../../components/common/StatusBadge.jsx';
@@ -14,7 +18,8 @@ import {
   Wrench, CheckCircle2, Clock, Globe, MapPin, Download,
   Calendar, FileText, AlertTriangle, Plus, Eye, Radio, Sparkles,
   Sliders, SlidersHorizontal, Save, RotateCcw, Undo2, BarChart3,
-  BrainCircuit, Repeat, ClipboardList, X, AlertCircle
+  BrainCircuit, Repeat, ClipboardList, X, AlertCircle, UploadCloud,
+  ArrowUpCircle, Layers, Cpu, Check
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -71,6 +76,139 @@ export default function DeviceDetail() {
   const [faultCfgEdit, setFaultCfgEdit] = useState({});     // local edits (overrides)
   const [faultCfgSaving, setFaultCfgSaving] = useState(false);
   const [faultCfgMsg, setFaultCfgMsg] = useState(null);     // { type: 'ok'|'err', text }
+
+  // ── Firmware & FOTA States ──
+  const [fwUpdateInfo, setFwUpdateInfo] = useState(null); // { latest_version, update_available, current_version }
+  const [checkingFw, setCheckingFw] = useState(false);
+  const [flashingFw, setFlashingFw] = useState(false);
+  const [fwModal, setFwModal] = useState(false);
+  const [fwReleasesList, setFwReleasesList] = useState([]);
+  const [uploadingBinary, setUploadingBinary] = useState(false);
+  const [uploadedBinaryMeta, setUploadedBinaryMeta] = useState(null);
+  const fwFileInputRef = useRef(null);
+  const [newFwRelease, setNewFwRelease] = useState({
+    version: '',
+    device_model: 'Techavo SmartLum-60W-V2',
+    release_title: '',
+    release_notes: '',
+    checksum_sha256: '',
+    binary_size_bytes: 154820,
+    binary_url: '',
+    is_critical: false,
+    status: 'active',
+  });
+  const [submittingFwRelease, setSubmittingFwRelease] = useState(false);
+  const [fwToast, setFwToast] = useState(null);
+
+  const showFwToast = (text, isErr = false) => {
+    setFwToast({ text, isErr });
+    setTimeout(() => setFwToast(null), 4000);
+  };
+
+  const handleCheckFirmwareUpdate = async () => {
+    setCheckingFw(true);
+    try {
+      const res = await checkFotaUpdates({ device_id: id });
+      const summary = res.data?.summary || {};
+      const latestVer = summary.latest_firmware_version || 'v2.4.2-prod';
+      const curVer = device?.firmware_version || 'v2.4.1-rc3';
+      const isUpToDate = curVer === latestVer;
+      setFwUpdateInfo({
+        latest_version: latestVer,
+        update_available: !isUpToDate,
+        current_version: curVer,
+      });
+      showFwToast(isUpToDate ? `Firmware is up to date (${curVer})` : `Update Available: ${latestVer}`);
+    } catch (e) {
+      showFwToast('Failed to check for updates', true);
+    } finally {
+      setCheckingFw(false);
+    }
+  };
+
+  const handleFlashFirmware = async (targetVersion) => {
+    setFlashingFw(true);
+    try {
+      const res = await triggerSingleDeviceFota({
+        device_id: id,
+        firmware_version: targetVersion || fwUpdateInfo?.latest_version || 'v2.4.2-prod',
+      });
+      showFwToast(`⚡ Firmware successfully updated to ${res.data?.new_version || targetVersion} over IPv6!`);
+      await fetchDevice();
+      setFwUpdateInfo({
+        latest_version: res.data?.new_version || targetVersion,
+        update_available: false,
+        current_version: res.data?.new_version || targetVersion,
+      });
+      setFwModal(false);
+    } catch (e) {
+      showFwToast(e.response?.data?.error || 'Firmware update failed', true);
+    } finally {
+      setFlashingFw(false);
+    }
+  };
+
+  const handleOpenFwModal = async () => {
+    setFwModal(true);
+    setUploadedBinaryMeta(null);
+    try {
+      const res = await getFirmwareReleases();
+      setFwReleasesList(res.data || []);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleFirmwareFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingBinary(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await uploadFirmwareBinary(formData);
+      const data = res.data;
+      const matchedVer = file.name.match(/v?\d+\.\d+(\.\d+)?(-[a-zA-Z0-9.]+)?/i);
+      const extractedVer = matchedVer ? (matchedVer[0].startsWith('v') ? matchedVer[0] : `v${matchedVer[0]}`) : '';
+      setUploadedBinaryMeta({
+        name: file.name,
+        size: file.size,
+        hash: data.checksum_sha256,
+        url: data.binary_url,
+      });
+      setNewFwRelease(prev => ({
+        ...prev,
+        version: prev.version || extractedVer || file.name.replace(/\.[^/.]+$/, ''),
+        release_title: prev.release_title || `Firmware ${extractedVer || file.name.replace(/\.[^/.]+$/, '')} Release`,
+        checksum_sha256: data.checksum_sha256,
+        binary_size_bytes: data.binary_size_bytes,
+        binary_url: data.binary_url,
+      }));
+      showFwToast(`✅ File uploaded: ${file.name}`);
+    } catch (err) {
+      showFwToast(err.response?.data?.error || 'Failed to upload firmware binary', true);
+    } finally {
+      setUploadingBinary(false);
+    }
+  };
+
+  const handlePublishAndFlashFw = async (e) => {
+    e.preventDefault();
+    if (!newFwRelease.version || !newFwRelease.release_title) {
+      showFwToast('Please provide version string and title', true);
+      return;
+    }
+    setSubmittingFwRelease(true);
+    try {
+      await createFirmwareRelease(newFwRelease);
+      showFwToast(`Firmware ${newFwRelease.version} published! Flashing to device...`);
+      await handleFlashFirmware(newFwRelease.version);
+    } catch (err) {
+      showFwToast(err.response?.data?.error || 'Failed to publish firmware', true);
+    } finally {
+      setSubmittingFwRelease(false);
+    }
+  };
 
   // Fetch Device Core Data
   const fetchDevice = async () => {
@@ -453,7 +591,6 @@ export default function DeviceDetail() {
                 ['Fixture Name', device.name],
                 ['Serial Number', device.serial_number || 'TECH-CCMS-2026-001'],
                 ['Device Model', device.device_model || 'Techavo SmartLum-60W-V2'],
-                ['Firmware Version', device.firmware_version || 'v2.4.1-rc3'],
                 ['Rated Power', device.rated_power ? `${device.rated_power} W` : '60 W (LED)'],
                 ['Rated Voltage', device.rated_voltage ? `${device.rated_voltage} V` : '230 V AC (50Hz)'],
                 ['Installation Date', device.installation_date || '2026-01-15'],
@@ -464,6 +601,59 @@ export default function DeviceDetail() {
                   <span className="diag-val">{v}</span>
                 </div>
               ))}
+
+              {/* Interactive Firmware Row */}
+              <div className="diag-row" style={{ padding: '10px 0', borderTop: '1px solid var(--border)', marginTop: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <div className="diag-key" style={{ fontWeight: 600 }}>Firmware Version</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#60a5fa', fontFamily: 'monospace' }}>
+                      {device.firmware_version || 'v2.4.1-rc3'}
+                    </span>
+                    {fwUpdateInfo && (
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                        background: fwUpdateInfo.update_available ? 'rgba(245,158,11,0.15)' : 'rgba(34,197,94,0.15)',
+                        color: fwUpdateInfo.update_available ? '#f59e0b' : '#22c55e',
+                        border: `1px solid ${fwUpdateInfo.update_available ? 'rgba(245,158,11,0.3)' : 'rgba(34,197,94,0.3)'}`,
+                      }}>
+                        {fwUpdateInfo.update_available ? `Update: ${fwUpdateInfo.latest_version}` : 'Up to Date'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: 11, padding: '4px 10px' }}
+                    onClick={handleCheckFirmwareUpdate}
+                    disabled={checkingFw}
+                  >
+                    <RefreshCw size={11} className={checkingFw ? 'spin' : ''} />
+                    {checkingFw ? 'Checking...' : 'Check for Updates'}
+                  </button>
+
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: 11, padding: '4px 10px' }}
+                    onClick={handleOpenFwModal}
+                  >
+                    <UploadCloud size={11} /> Add / Upload Firmware
+                  </button>
+
+                  {fwUpdateInfo?.update_available && (
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ fontSize: 11, padding: '4px 10px', background: '#f59e0b', borderColor: '#f59e0b' }}
+                      onClick={() => handleFlashFirmware(fwUpdateInfo.latest_version)}
+                      disabled={flashingFw}
+                    >
+                      <Radio size={11} /> {flashingFw ? 'Flashing...' : `Flash ${fwUpdateInfo.latest_version}`}
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -518,15 +708,16 @@ export default function DeviceDetail() {
                 <div className="empty-state"><p>Waiting for live stream packets...</p></div>
               ) : (
                 <ResponsiveContainer width="100%" height={320}>
-                  <LineChart data={chartData} margin={{ top: 10, right: 20, left: -20, bottom: 5 }}>
+                  <LineChart data={chartData} margin={{ top: 10, right: 10, left: -15, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} />
                     <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} interval="preserveStartEnd" />
-                    <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                    <YAxis yAxisId="left" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fill: '#22c55e', fontSize: 11 }} unit=" A" domain={['auto', 'auto']} />
                     <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
                     <Legend wrapperStyle={{ fontSize: 12, color: 'var(--text-secondary)', paddingTop: 8 }} />
-                    <Line type="monotone" dataKey="Voltage" name="Voltage (V)" stroke="#38bdf8" strokeWidth={2.5} dot={false} />
-                    <Line type="monotone" dataKey="Current" name="Current (A)" stroke="#22c55e" strokeWidth={2.5} dot={false} />
-                    <Line type="monotone" dataKey="Power" name="Power (W)" stroke="#f97316" strokeWidth={2.5} dot={false} />
+                    <Line yAxisId="left" type="monotone" dataKey="Voltage" name="Voltage (V)" stroke="#38bdf8" strokeWidth={2.5} dot={false} />
+                    <Line yAxisId="right" type="monotone" dataKey="Current" name="Current (A)" stroke="#22c55e" strokeWidth={2.5} dot={false} />
+                    <Line yAxisId="left" type="monotone" dataKey="Power" name="Power (W)" stroke="#f97316" strokeWidth={2.5} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -1278,6 +1469,230 @@ export default function DeviceDetail() {
           />
         </div>
       </Modal>
+
+      {/* ── Firmware Toast ── */}
+      {fwToast && (
+        <div style={{
+          position: 'fixed', top: 20, right: 24, zIndex: 9999,
+          background: fwToast.isErr ? '#ef4444' : '#10b981',
+          color: '#fff', padding: '10px 18px', borderRadius: 8,
+          fontSize: 13, fontWeight: 600, boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+          display: 'flex', alignItems: 'center', gap: 8,
+          animation: 'fadeIn 0.2s ease',
+        }}>
+          {fwToast.isErr ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
+          {fwToast.text}
+        </div>
+      )}
+
+      {/* ── Modal: Add / Upload Firmware & Flash OTA ── */}
+      {fwModal && (
+        <Modal
+          title={`Firmware Update & Upload — ${device.uid}`}
+          open={fwModal}
+          onClose={() => setFwModal(false)}
+        >
+          {/* Current Luminaire Status Banner */}
+          <div style={{
+            background: 'rgba(59,130,246,0.08)',
+            border: '1px solid rgba(59,130,246,0.25)',
+            borderRadius: 8,
+            padding: '10px 14px',
+            marginBottom: 16,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Current Device Version</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#60a5fa', fontFamily: 'monospace' }}>
+                {device.firmware_version || 'v2.4.1-rc3'}
+              </div>
+            </div>
+            {fwUpdateInfo?.latest_version && (
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Latest Active Release</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#22c55e', fontFamily: 'monospace' }}>
+                  {fwUpdateInfo.latest_version}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Existing Releases Quick-Flash */}
+          {fwReleasesList.length > 0 && (
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Quick Flash Available Releases
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 130, overflowY: 'auto' }}>
+                {fwReleasesList.map(rel => {
+                  const isCurrent = (device.firmware_version || 'v2.4.1-rc3') === rel.version;
+                  return (
+                    <div key={rel.id} style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '8px 12px', borderRadius: 6,
+                      background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+                    }}>
+                      <div>
+                        <span style={{ fontWeight: 700, fontSize: 13, fontFamily: 'monospace', color: isCurrent ? 'var(--text-muted)' : '#60a5fa' }}>
+                          {rel.version}
+                        </span>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>
+                          {rel.release_title}
+                        </span>
+                      </div>
+                      <div>
+                        {isCurrent ? (
+                          <span style={{ fontSize: 11, color: '#22c55e', fontWeight: 600 }}>Active Version</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            style={{ fontSize: 11, padding: '3px 10px' }}
+                            disabled={flashingFw}
+                            onClick={() => handleFlashFirmware(rel.version)}
+                          >
+                            <Radio size={11} /> {flashingFw ? 'Flashing...' : 'Flash to Device'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Form to Upload New Firmware Binary */}
+          <form onSubmit={handlePublishAndFlashFw}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Upload New Firmware Binary File
+            </div>
+
+            {/* Drag/Drop & File Input */}
+            <div style={{
+              border: '2px dashed var(--border)',
+              borderRadius: 8,
+              padding: '14px 18px',
+              textAlign: 'center',
+              background: uploadedBinaryMeta ? 'rgba(34,197,94,0.06)' : 'var(--bg-secondary)',
+              borderColor: uploadedBinaryMeta ? '#22c55e' : 'var(--border)',
+              marginBottom: 14,
+            }}>
+              <input
+                ref={fwFileInputRef}
+                type="file"
+                accept=".bin,.hex,.zip,.tar,.gz,.elf"
+                style={{ display: 'none' }}
+                onChange={handleFirmwareFileUpload}
+              />
+
+              {uploadedBinaryMeta ? (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, color: '#22c55e', fontWeight: 700, fontSize: 12 }}>
+                    <CheckCircle2 size={16} /> Binary File Uploaded & Verified
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginTop: 2 }}>
+                    {uploadedBinaryMeta.name} ({(uploadedBinaryMeta.size / 1024).toFixed(1)} KB)
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: 2 }}>
+                    SHA-256: {uploadedBinaryMeta.hash?.slice(0, 24)}...
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginTop: 6, fontSize: 11 }}
+                    onClick={() => fwFileInputRef.current?.click()}
+                  >
+                    Change Binary File
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <UploadCloud size={28} color="#3b82f6" style={{ margin: '0 auto 6px', display: 'block' }} />
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {uploadingBinary ? 'Uploading & Computing SHA-256...' : 'Select Firmware Binary (.bin, .hex, .zip)'}
+                  </div>
+                  <p style={{ fontSize: 10, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
+                    Auto-calculates SHA-256 hash and byte size
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    style={{ fontSize: 11 }}
+                    disabled={uploadingBinary}
+                    onClick={() => fwFileInputRef.current?.click()}
+                  >
+                    {uploadingBinary ? 'Uploading...' : 'Browse Binary File'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div className="form-group">
+                <label className="form-label" style={{ fontSize: 11 }}>Version String *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  placeholder="e.g. v2.4.3-prod"
+                  value={newFwRelease.version}
+                  onChange={e => setNewFwRelease(p => ({ ...p, version: e.target.value }))}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" style={{ fontSize: 11 }}>Hardware Luminaire Model *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  value={newFwRelease.device_model}
+                  onChange={e => setNewFwRelease(p => ({ ...p, device_model: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 10 }}>
+              <label className="form-label" style={{ fontSize: 11 }}>Release Title *</label>
+              <input
+                type="text"
+                className="form-input"
+                required
+                placeholder="e.g. Power Factor & Dimming Optimization"
+                value={newFwRelease.release_title}
+                onChange={e => setNewFwRelease(p => ({ ...p, release_title: e.target.value }))}
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label" style={{ fontSize: 11 }}>Release Notes</label>
+              <textarea
+                className="form-input"
+                rows={2}
+                placeholder="Bug fixes, performance improvements..."
+                value={newFwRelease.release_notes}
+                onChange={e => setNewFwRelease(p => ({ ...p, release_notes: e.target.value }))}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setFwModal(false)}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                disabled={submittingFwRelease || flashingFw}
+              >
+                {submittingFwRelease || flashingFw ? 'Publishing & Flashing...' : 'Publish & Flash OTA'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }

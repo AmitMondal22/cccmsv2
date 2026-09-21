@@ -363,10 +363,173 @@ export default function Reports({ defaultType }) {
     return { chartFaultTypes: types, chartFaultSeverity: severities };
   }, [faultRows]);
 
+  const activeTabObj = REPORT_TABS.find(t => t.id === activeTab);
+
+  // ── Dedicated Table-Only Print Handler ──
+  const handlePrintOnlyTable = () => {
+    const tableEl = document.querySelector('.reports-page-container table.data-table');
+    if (!tableEl) {
+      window.print();
+      return;
+    }
+
+    const reportTitle = activeTabObj?.label || 'Comprehensive System Report';
+    const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    const locationParts = [
+      selectedCity && `City: ${cities.find(c => c.id === parseInt(selectedCity))?.name || selectedCity}`,
+      selectedZone && `Zone: ${filteredZones.find(z => z.id === parseInt(selectedZone))?.name || selectedZone}`,
+      selectedWard && `Ward: ${filteredWards.find(w => w.id === parseInt(selectedWard))?.name || selectedWard}`,
+      selectedStreet && `Street: ${filteredStreets.find(s => s.id === parseInt(selectedStreet))?.name || selectedStreet}`,
+      selectedDeviceId && `Device: ${deviceList.find(d => d.id === parseInt(selectedDeviceId))?.uid || selectedDeviceId}`,
+      (activeTab === 'telemetry' || activeTab === 'fault') && `Date Range: ${dateFrom} to ${dateTo}`,
+    ].filter(Boolean).join(' | ') || 'All Locations (Full Fleet)';
+
+    const tableHTML = tableEl.outerHTML;
+
+    let printFrame = document.getElementById('print-report-frame');
+    if (!printFrame) {
+      printFrame = document.createElement('iframe');
+      printFrame.id = 'print-report-frame';
+      printFrame.style.position = 'fixed';
+      printFrame.style.top = '-99999px';
+      printFrame.style.left = '-99999px';
+      printFrame.style.width = '0';
+      printFrame.style.height = '0';
+      printFrame.style.border = 'none';
+      document.body.appendChild(printFrame);
+    }
+
+    const doc = printFrame.contentWindow.document;
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${reportTitle} - TECHAVO CCMS</title>
+          <style>
+            @page {
+              size: A4 landscape;
+              margin: 8mm 6mm;
+            }
+            * {
+              box-sizing: border-box;
+              margin: 0;
+              padding: 0;
+            }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+              color: #0f172a;
+              background: #ffffff;
+              padding: 8px;
+              font-size: 10px;
+            }
+            .header-wrap {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              border-bottom: 2px solid #0f172a;
+              padding-bottom: 8px;
+              margin-bottom: 12px;
+            }
+            .title-main {
+              font-size: 15px;
+              font-weight: 800;
+              text-transform: uppercase;
+              color: #0f172a;
+              letter-spacing: 0.03em;
+            }
+            .title-sub {
+              font-size: 12px;
+              font-weight: 700;
+              color: #2563eb;
+              margin-top: 2px;
+            }
+            .meta-info {
+              text-align: right;
+              font-size: 9.5px;
+              color: #475569;
+              line-height: 1.4;
+            }
+            table {
+              width: 100% !important;
+              border-collapse: collapse !important;
+              font-size: 9px !important;
+              background: #ffffff !important;
+              margin: 0 !important;
+            }
+            th, td {
+              border: 1px solid #cbd5e1 !important;
+              padding: 4px 6px !important;
+              text-align: left !important;
+              vertical-align: middle !important;
+              word-break: break-word !important;
+              color: #0f172a !important;
+            }
+            th {
+              background-color: #f1f5f9 !important;
+              font-weight: 700 !important;
+              text-transform: uppercase !important;
+              font-size: 8.5px !important;
+              letter-spacing: 0.03em !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            tr {
+              page-break-inside: avoid !important;
+            }
+            tr:nth-child(even) td {
+              background-color: #f8fafc !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .badge, .status-badge {
+              display: inline-block;
+              padding: 1px 4px;
+              font-size: 8px;
+              font-weight: 700;
+              border: 1px solid #94a3b8;
+              border-radius: 3px;
+              background: transparent;
+              color: #0f172a;
+            }
+            .dim {
+              color: #64748b;
+            }
+            .spinner {
+              display: none !important;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header-wrap">
+            <div>
+              <div class="title-main">TECHAVO CCMS — Centralized Streetlight Control & Monitoring System</div>
+              <div class="title-sub">${reportTitle}</div>
+            </div>
+            <div class="meta-info">
+              <div><strong>Generated:</strong> ${timestamp} (IST)</div>
+              <div><strong>Scope:</strong> ${locationParts}</div>
+            </div>
+          </div>
+          <div class="table-container">
+            ${tableHTML}
+          </div>
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    setTimeout(() => {
+      printFrame.contentWindow.focus();
+      printFrame.contentWindow.print();
+    }, 250);
+  };
+
   return (
-    <div>
-      {/* ── Page Header ── */}
-      <div className="page-header">
+    <div className="reports-page-container">
+      {/* ── Page Header (Screen only) ── */}
+      <div className="page-header no-print">
         <div>
           <h1 className="page-title">Comprehensive Device Data & Analytics Reports</h1>
           <p className="page-subtitle">
@@ -402,14 +565,14 @@ export default function Reports({ defaultType }) {
           <button className="btn btn-primary" onClick={exportToCSV}>
             <Download size={14} /> Export CSV
           </button>
-          <button className="btn btn-secondary" onClick={() => window.print()}>
+          <button className="btn btn-secondary" onClick={handlePrintOnlyTable}>
             <Printer size={14} /> Print Report
           </button>
         </div>
       </div>
 
-      {/* ── Tabbed Report Category Switcher ── */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto', paddingBottom: 6 }}>
+      {/* ── Tabbed Report Category Switcher (Screen only) ── */}
+      <div className="report-tabs-bar no-print" style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto', paddingBottom: 6 }}>
         {REPORT_TABS.map(tab => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
@@ -426,8 +589,8 @@ export default function Reports({ defaultType }) {
         })}
       </div>
 
-      {/* ── Multi-Filter Bar ── */}
-      <div className="hierarchy-filter-bar" style={{ marginBottom: 20 }}>
+      {/* ── Multi-Filter Bar (Screen only) ── */}
+      <div className="hierarchy-filter-bar no-print" style={{ marginBottom: 20 }}>
         {/* City */}
         <div>
           <label className="form-label">City</label>
@@ -508,7 +671,7 @@ export default function Reports({ defaultType }) {
       {activeTab === 'telemetry' && (
         <div>
           {/* Summary KPIs */}
-          <div className="kpi-grid" style={{ marginBottom: 20 }}>
+          <div className="kpi-grid no-print" style={{ marginBottom: 20 }}>
             <div className="kpi-card">
               <div className="kpi-card-value" style={{ color: 'var(--brand)' }}>{telemetryStats.count}</div>
               <div className="kpi-card-label">Telemetry Packets</div>
@@ -529,7 +692,7 @@ export default function Reports({ defaultType }) {
 
           {/* Interactive Chart Analytics Section */}
           {(viewMode === 'both' || viewMode === 'charts') && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: 20, marginBottom: 20 }}>
+            <div className="no-print" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: 20, marginBottom: 20 }}>
               {/* Chart 1: Voltage & Real Power Trends */}
               <div className="card">
                 <div className="card-header">
@@ -673,7 +836,7 @@ export default function Reports({ defaultType }) {
         <div>
           {/* Visual Analytics Chart for Device Summary */}
           {(viewMode === 'both' || viewMode === 'charts') && chartDeviceSummary.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: 20, marginBottom: 20 }}>
+            <div className="no-print" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: 20, marginBottom: 20 }}>
               <div className="card">
                 <div className="card-header">
                   <div>
@@ -795,7 +958,7 @@ export default function Reports({ defaultType }) {
       {(activeTab === 'city' || activeTab === 'zone' || activeTab === 'ward') && hierarchyReport && (
         <div>
           {/* Summary KPIs */}
-          <div className="kpi-grid" style={{ marginBottom: 20 }}>
+          <div className="kpi-grid no-print" style={{ marginBottom: 20 }}>
             <div className="kpi-card">
               <div className="kpi-card-value">{hierarchyReport.summary?.totalDevices ?? 0}</div>
               <div className="kpi-card-label">Total Luminaires</div>
@@ -820,7 +983,7 @@ export default function Reports({ defaultType }) {
 
           {/* Sub-division Analytics Chart */}
           {(viewMode === 'both' || viewMode === 'charts') && chartHierarchy.length > 0 && (
-            <div className="card" style={{ marginBottom: 20 }}>
+            <div className="card no-print" style={{ marginBottom: 20 }}>
               <div className="card-header">
                 <div>
                   <div className="card-title">Sub-Division Operational Comparison</div>
@@ -891,7 +1054,7 @@ export default function Reports({ defaultType }) {
         <div>
           {/* Fault Summary Charts */}
           {(viewMode === 'both' || viewMode === 'charts') && faultRows.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 20, marginBottom: 20 }}>
+            <div className="no-print" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 20, marginBottom: 20 }}>
               {/* Fault by Type */}
               <div className="card">
                 <div className="card-header">
