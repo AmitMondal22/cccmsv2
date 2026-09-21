@@ -525,10 +525,6 @@ export default function Reports({ defaultType }) {
               <div className="kpi-card-value" style={{ color: '#f97316' }}>{telemetryStats.peakP} <span style={{ fontSize: 14 }}>W</span></div>
               <div className="kpi-card-label">Peak Active Power</div>
             </div>
-            <div className="kpi-card">
-              <div className="kpi-card-value" style={{ color: '#a855f7' }}>{telemetryStats.avgPf}</div>
-              <div className="kpi-card-label">Avg Power Factor</div>
-            </div>
           </div>
 
           {/* Interactive Chart Analytics Section */}
