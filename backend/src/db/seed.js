@@ -13,8 +13,8 @@ async function seed() {
     await sequelize.sync({ alter: true });
     console.log('✅ DB connected and synced');
 
-    // ── Clean up existing old devices & telemetry to ensure only requested seed data exists
-    console.log('🧹 Cleaning old test data...');
+    // ── Clean up existing old test data
+    console.log('🧹 Cleaning old test data & telemetry...');
     await Telemetry.destroy({ where: {} });
     await Alert.destroy({ where: {} });
     await MaintenanceTicket.destroy({ where: {} });
@@ -120,7 +120,7 @@ async function seed() {
       ward_id: ward05.id,
     });
 
-    // ── Devices: ONLY TS00000001 and TS00000002 in Kolkata
+    // ── Devices: Registered TS00000001 & TS00000002 without dummy historical telemetry
     const deviceDefs = [
       {
         uid: 'TS00000001',
@@ -135,16 +135,9 @@ async function seed() {
         rated_voltage: 230,
         rated_power: 60,
         status: 'active',
-        connectivity_status: 'online',
-        light_status: 'on',
+        connectivity_status: 'offline',
+        light_status: 'off',
         health_status: 'normal',
-        last_seen: new Date(),
-        voltage: 238.40,
-        current: 0.2610,
-        real_power: 62.22,
-        pf: 0.94,
-        kwh: 14.8520,
-        run_hours: 48.5,
       },
       {
         uid: 'TS00000002',
@@ -159,16 +152,9 @@ async function seed() {
         rated_voltage: 230,
         rated_power: 60,
         status: 'active',
-        connectivity_status: 'online',
-        light_status: 'on',
+        connectivity_status: 'offline',
+        light_status: 'off',
         health_status: 'normal',
-        last_seen: new Date(),
-        voltage: 240.15,
-        current: 0.2540,
-        real_power: 61.00,
-        pf: 0.93,
-        kwh: 12.3140,
-        run_hours: 42.0,
       },
     ];
 
@@ -190,57 +176,26 @@ async function seed() {
         connectivity_status: d.connectivity_status,
         light_status: d.light_status,
         health_status: d.health_status,
-        last_seen: d.last_seen,
+        last_seen: null,
       });
 
-      // Latest State
+      // Initialize clean latest state with 0 values (awaits real live UDP telemetry from device)
       await DeviceLatestState.create({
         device_id: device.id,
-        voltage: d.voltage,
-        current: d.current,
-        real_power: d.real_power,
-        pf: d.pf,
-        kwh: d.kwh,
-        run_hours: d.run_hours,
+        voltage: 0,
+        current: 0,
+        real_power: 0,
+        pf: 0,
+        kwh: 0,
+        run_hours: 0,
         frequency: 50.00,
-        light_status: 1,
-        relay_status: 1,
+        light_status: 0,
+        relay_status: 0,
         fault: 0,
-        packet_timestamp: new Date(),
-        server_timestamp: new Date(),
-        packets_today: 720,
-        packets_total: 15420,
+        packets_today: 0,
+        packets_total: 0,
       });
 
-      // Generate initial telemetry history points for reports & charts
-      const now = Date.now();
-      const telemetryEntries = [];
-      for (let i = 24; i >= 0; i--) {
-        const time = new Date(now - i * 3600 * 1000);
-        const isNight = time.getHours() < 6 || time.getHours() >= 18;
-        const v = 235 + Math.random() * 8;
-        const c = isNight ? (0.24 + Math.random() * 0.03) : 0;
-        const p = v * c;
-
-        telemetryEntries.push({
-          device_id: device.id,
-          uid: d.uid,
-          packet_timestamp: time,
-          server_timestamp: time,
-          voltage: parseFloat(v.toFixed(2)),
-          current: parseFloat(c.toFixed(4)),
-          real_power: parseFloat(p.toFixed(4)),
-          pf: isNight ? 0.93 : 0,
-          frequency: 50.00,
-          kwh: parseFloat((d.kwh - (i * 0.05)).toFixed(4)),
-          run_hours: parseFloat((d.run_hours - (i * 0.1)).toFixed(2)),
-          light_status: isNight ? 1 : 0,
-          relay_status: isNight ? 1 : 0,
-          fault: 0,
-        });
-      }
-
-      await Telemetry.bulkCreate(telemetryEntries);
       devices.push(device);
     }
 
@@ -292,11 +247,11 @@ async function seed() {
       });
     }
 
-    console.log('✅ Kolkata Seed complete!');
+    console.log('✅ Clean Seed complete! (NO dummy telemetry data)');
     console.log('');
     console.log('🏛️ City:        Kolkata (West Bengal, India)');
     console.log('📍 Location:    Park Street / Camac Street (Ward 63)');
-    console.log('📦 Seeded UIDs: TS00000001, TS00000002');
+    console.log('📦 Seeded UIDs: TS00000001, TS00000002 (Waiting for live UDP packets)');
     console.log('📧 Super Admin: admin@techavo.com  /  Admin@123');
     console.log('🔧 Technician:  tech@techavo.com   /  Tech@123');
 
