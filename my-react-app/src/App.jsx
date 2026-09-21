@@ -10,6 +10,7 @@ import DeviceList from './pages/devices/DeviceList.jsx';
 import DeviceDetail from './pages/devices/DeviceDetail.jsx';
 import LiveMonitoring from './pages/devices/LiveMonitoring.jsx';
 import DeviceDiagnostics from './pages/devices/DeviceDiagnostics.jsx';
+import FotaManagement from './pages/fota/FotaManagement.jsx';
 import ActiveAlerts from './pages/alerts/ActiveAlerts.jsx';
 import AlertRules from './pages/alerts/AlertRules.jsx';
 import EnergyConsumption from './pages/energy/EnergyConsumption.jsx';
@@ -72,6 +73,8 @@ function App() {
                 <Route path="devices/live" element={<LiveMonitoring />} />
                 <Route path="devices/diag" element={<DeviceDiagnostics />} />
                 <Route path="devices/:id" element={<DeviceDetail />} />
+                <Route path="fota" element={<FotaManagement />} />
+                <Route path="devices/fota" element={<FotaManagement />} />
 
                 {/* Alerts */}
                 <Route path="alerts" element={<ActiveAlerts />} />

@@ -6,8 +6,20 @@ process.env.TZ = 'Asia/Kolkata';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
+import multipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { sequelize } from './models/index.js';
 import { startUDPServer, startOfflineDetector } from './telemetry/udpServer.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+const fwUploadsDir = path.join(uploadsDir, 'firmware');
+if (!fs.existsSync(fwUploadsDir)) fs.mkdirSync(fwUploadsDir, { recursive: true });
 
 // Routes
 import authRoutes from './routes/auth.routes.js';
@@ -21,6 +33,7 @@ import auditRoutes from './routes/audit.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import reportRoutes from './routes/report.routes.js';
 import energyRoutes from './routes/energy.routes.js';
+import fotaRoutes from './routes/fota.routes.js';
 
 const fastify = Fastify({
   logger: {
@@ -43,6 +56,15 @@ await fastify.register(cors, {
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Request-Method', 'Access-Control-Request-Headers'],
   exposedHeaders: ['*'],
   maxAge: 86400,
+});
+
+await fastify.register(multipart, {
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+});
+
+await fastify.register(fastifyStatic, {
+  root: uploadsDir,
+  prefix: '/uploads/',
 });
 
 await fastify.register(jwt, {
@@ -70,6 +92,7 @@ await fastify.register(auditRoutes, { prefix: '/api/audit' });
 await fastify.register(notificationRoutes, { prefix: '/api/notifications' });
 await fastify.register(reportRoutes, { prefix: '/api/reports' });
 await fastify.register(energyRoutes, { prefix: '/api/energy' });
+await fastify.register(fotaRoutes, { prefix: '/api/fota' });
 
 // Health check
 fastify.get('/api/health', async () => ({

@@ -15,6 +15,7 @@ const routeLabels = {
   '/devices': 'All Devices',
   '/devices/live': 'Live Monitoring',
   '/devices/diag': 'Diagnostics',
+  '/fota': 'FOTA & Firmware Management',
   '/alerts': 'Alerts',
   '/alert-rules': 'Alert Rules',
   '/energy': 'Energy & Demand Analytics',

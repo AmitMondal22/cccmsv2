@@ -13,6 +13,9 @@ import Alert from './Alert.js';
 import MaintenanceTicket from './MaintenanceTicket.js';
 import AuditLog from './AuditLog.js';
 import Notification from './Notification.js';
+import FirmwareRelease from './FirmwareRelease.js';
+import FotaCampaign from './FotaCampaign.js';
+import FotaDeviceJob from './FotaDeviceJob.js';
 
 // ─── Organization Hierarchy ────────────────────────────────────
 Project.hasMany(City, { foreignKey: 'project_id', as: 'cities' });
@@ -63,6 +66,16 @@ Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 User.hasMany(AuditLog, { foreignKey: 'user_id', as: 'auditLogs' });
 AuditLog.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
+// ─── FOTA Updates & Version Control ───────────────────────────
+FirmwareRelease.hasMany(FotaCampaign, { foreignKey: 'firmware_id', as: 'campaigns' });
+FotaCampaign.belongsTo(FirmwareRelease, { foreignKey: 'firmware_id', as: 'firmware' });
+
+FotaCampaign.hasMany(FotaDeviceJob, { foreignKey: 'campaign_id', as: 'jobs' });
+FotaDeviceJob.belongsTo(FotaCampaign, { foreignKey: 'campaign_id', as: 'campaign' });
+
+Device.hasMany(FotaDeviceJob, { foreignKey: 'device_id', as: 'fotaJobs' });
+FotaDeviceJob.belongsTo(Device, { foreignKey: 'device_id', as: 'device' });
+
 export {
   sequelize,
   Project,
@@ -79,4 +92,7 @@ export {
   MaintenanceTicket,
   AuditLog,
   Notification,
+  FirmwareRelease,
+  FotaCampaign,
+  FotaDeviceJob,
 };

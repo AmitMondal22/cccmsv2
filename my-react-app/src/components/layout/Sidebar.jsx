@@ -4,7 +4,7 @@ import {
   MapPin, Route, Cpu, Activity, Stethoscope, Bell, Zap,
   Clock, Wrench, ClipboardList, History, BarChart3,
   FileText, Users, Shield, ScrollText, Settings, ChevronRight,
-  LogOut,
+  LogOut, Radio,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.jsx';
 
@@ -31,6 +31,7 @@ const nav = [
       { to: '/devices',            icon: Cpu,          label: 'All Devices' },
       { to: '/devices/live',       icon: Activity,     label: 'Live Monitoring' },
       { to: '/devices/diag',       icon: Stethoscope,  label: 'Diagnostics' },
+      { to: '/fota',               icon: Radio,        label: 'FOTA & Firmware' },
     ],
   },
   {
