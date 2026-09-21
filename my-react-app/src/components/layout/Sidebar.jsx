@@ -83,7 +83,6 @@ export default function Sidebar({ collapsed, alertCount = 0 }) {
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       {/* Logo */}
       <NavLink to="/" className="sidebar-logo">
-        <div className="sidebar-logo-icon">T</div>
         <div className="sidebar-logo-text">
           <div className="sidebar-logo-title">TECHAVO</div>
           <div className="sidebar-logo-sub">Street Light CCMS</div>
@@ -118,30 +117,25 @@ export default function Sidebar({ collapsed, alertCount = 0 }) {
             })}
           </div>
         ))}
-
-        {/* Logout */}
-        <div style={{ marginTop: 8 }}>
-          <button
-            className="nav-item"
-            style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}
-            onClick={logout}
-            title={collapsed ? 'Logout' : undefined}
-          >
-            <span className="nav-item-icon"><LogOut size={16} /></span>
-            <span className="nav-item-label">Logout</span>
-          </button>
-        </div>
       </nav>
 
       {/* Footer */}
       <div className="sidebar-footer">
-        <div className="sidebar-user-avatar">
+        <div className="sidebar-user-avatar" title={user?.name || 'User'}>
           {user?.name?.charAt(0).toUpperCase() || 'U'}
         </div>
         <div className="sidebar-user-info">
           <div className="sidebar-user-name">{user?.name || 'User'}</div>
           <div className="sidebar-user-role">{user?.role?.replace(/_/g, ' ') || 'Role'}</div>
         </div>
+        <button
+          className="sidebar-logout-btn"
+          onClick={logout}
+          title="Sign out / Logout"
+          aria-label="Logout"
+        >
+          <LogOut size={16} />
+        </button>
       </div>
     </aside>
   );

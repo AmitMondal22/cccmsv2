@@ -6,7 +6,7 @@ import { Eye, EyeOff, Zap } from 'lucide-react';
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ email: 'admin@techavo.com', password: 'Admin@123' });
+  const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
@@ -33,9 +33,8 @@ export default function Login() {
       <div className="login-card">
         {/* Brand */}
         <div className="login-logo">
-          <div className="login-logo-icon">T</div>
           <div>
-            <div className="login-logo-title">TECHAVO</div>
+            <div className="login-logo-title">TECHAVO SYSTEMS</div>
             <div className="login-logo-sub">Smart Infrastructure Platform</div>
           </div>
         </div>
@@ -54,7 +53,7 @@ export default function Login() {
               className="form-input"
               value={form.email}
               onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
-              placeholder="admin@techavo.com"
+              placeholder="Enter your email"
               required
               autoComplete="email"
             />
@@ -69,7 +68,7 @@ export default function Login() {
                 className="form-input"
                 value={form.password}
                 onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
-                placeholder="Your password"
+                placeholder="Enter your password"
                 required
                 autoComplete="current-password"
                 style={{ paddingRight: 40 }}
@@ -77,7 +76,18 @@ export default function Login() {
               <button
                 type="button"
                 onClick={() => setShowPwd(p => !p)}
-                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
+                style={{
+                  position: 'absolute',
+                  right: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-muted)',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
               >
                 {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
@@ -98,15 +108,6 @@ export default function Login() {
             )}
           </button>
         </form>
-
-        {/* Demo credentials hint */}
-        <div style={{ marginTop: 24, padding: 12, background: 'rgba(79,142,247,0.06)', border: '1px solid rgba(79,142,247,0.15)', borderRadius: 'var(--r-sm)' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 600 }}>DEMO CREDENTIALS</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            <div>Admin: admin@techavo.com / Admin@123</div>
-            <div>Tech: tech@techavo.com / Tech@123</div>
-          </div>
-        </div>
       </div>
     </div>
   );
