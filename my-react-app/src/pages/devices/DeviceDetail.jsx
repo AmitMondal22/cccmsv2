@@ -12,7 +12,9 @@ import Modal from '../../components/common/Modal.jsx';
 import {
   ArrowLeft, RefreshCw, Power, Zap, Activity, ShieldAlert,
   Wrench, CheckCircle2, Clock, Globe, MapPin, Download,
-  Calendar, FileText, AlertTriangle, Plus, Eye, Radio, Sparkles
+  Calendar, FileText, AlertTriangle, Plus, Eye, Radio, Sparkles,
+  Sliders, SlidersHorizontal, Save, RotateCcw, Undo2, BarChart3,
+  BrainCircuit, Repeat, ClipboardList, X, AlertCircle
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -399,13 +401,13 @@ export default function DeviceDetail() {
       {/* ── Electrical Readout Grid (Live Gauges) ── */}
       <div className="elec-grid" style={{ marginBottom: 20 }}>
         {[
-          { label: 'Voltage',      value: s?.voltage,    unit: 'V',   color: '#38bdf8', sub: 'Safe (190-255V)' },
-          { label: 'Current',      value: s?.current,    unit: 'A',   color: '#22c55e', sub: 'Load Current' },
-          { label: 'Active Power', value: s?.real_power, unit: 'W',   color: '#f97316', sub: '' },
-          { label: 'Power Factor', value: s?.pf,         unit: '',    color: '#a855f7', sub: '' },
-          { label: 'Grid Freq',    value: s?.frequency,  unit: 'Hz',  color: '#38bdf8', sub: 'Nominal 50Hz' },
-          { label: 'Cumulative Energy', value: s?.kwh,   unit: 'kWh', color: '#f59e0b', sub: 'Total Consumption' },
-          { label: 'Burn Hours',   value: s?.run_hours,  unit: 'h',   color: '#ec4899', sub: 'Lifetime Operation' },
+          { label: 'Voltage', value: s?.voltage, unit: 'V', color: '#38bdf8', sub: 'Safe (190-255V)' },
+          { label: 'Current', value: s?.current, unit: 'A', color: '#22c55e', sub: 'Load Current' },
+          { label: 'Active Power', value: s?.real_power, unit: 'W', color: '#f97316', sub: '' },
+          { label: 'Power Factor', value: s?.pf, unit: '', color: '#a855f7', sub: '' },
+          { label: 'Grid Freq', value: s?.frequency, unit: 'Hz', color: '#38bdf8', sub: 'Nominal 50Hz' },
+          { label: 'Cumulative Energy', value: s?.kwh, unit: 'kWh', color: '#f59e0b', sub: 'Total Consumption' },
+          { label: 'Burn Hours', value: s?.run_hours, unit: 'h', color: '#ec4899', sub: 'Lifetime Operation' },
         ].map(item => (
           <div key={item.label} className="elec-tile">
             <div className="elec-value" style={{ color: item.color }}>
@@ -425,7 +427,9 @@ export default function DeviceDetail() {
             key={t}
             className={`tab ${tab === t ? 'active' : ''}`}
             onClick={() => setTab(t)}
+            style={{ display: 'inline-flex', alignItems: 'center' }}
           >
+            {t === 'Fault Config' && <SlidersHorizontal size={13} style={{ marginRight: 6 }} />}
             {t}
             {t === 'Alerts' && alerts.length > 0 && (
               <span className="nav-badge" style={{ marginLeft: 6 }}>{alerts.length}</span>
@@ -477,11 +481,11 @@ export default function DeviceDetail() {
             </div>
             <div className="card-body" style={{ padding: '16px 20px' }}>
               {[
-                ['City',      device.street?.ward?.zone?.city?.name || '—'],
-                ['Zone',      device.street?.ward?.zone?.name || '—'],
-                ['Ward',      device.street?.ward?.name || '—'],
-                ['Street',    device.street?.name || '—'],
-                ['Latitude',  device.latitude || '22.5535'],
+                ['City', device.street?.ward?.zone?.city?.name || '—'],
+                ['Zone', device.street?.ward?.zone?.name || '—'],
+                ['Ward', device.street?.ward?.name || '—'],
+                ['Street', device.street?.name || '—'],
+                ['Latitude', device.latitude || '22.5535'],
                 ['Longitude', device.longitude || '88.3518'],
                 ['GPS Accuracy', 'High (< 2.5m)'],
                 ['Mounting Type', 'Pole Arm Mount (8m height)'],
@@ -834,45 +838,45 @@ export default function DeviceDetail() {
       {tab === 'Fault Config' && faultCfgData && (() => {
         const { defaults, effective } = faultCfgData;
 
-        const FIELDS = [
+        const SECTIONS = [
           {
-            group: 'Voltage & Current Thresholds',
-            color: '#38bdf8',
-            icon: '⚡',
-            items: [
-              { key: 'supply_voltage_min',    label: 'Min Supply Voltage (V)',        unit: 'V',   desc: 'Below this → FC-07 (No Supply)' },
-              { key: 'open_circuit_current',  label: 'Open Circuit Threshold (A)',    unit: 'A',   desc: 'Below this with lamp ON → FC-01' },
-              { key: 'overcurrent_ratio',     label: 'Overcurrent Ratio',             unit: '×',   desc: 'Above baseline × this → FC-03' },
+            title: 'Voltage & Current',
+            Icon: Zap,
+            color: '#3b82f6',
+            fields: [
+              { key: 'supply_voltage_min',   label: 'Min Supply Voltage',   unit: 'V',  hint: 'FC-07 — no supply', step: 'any' },
+              { key: 'open_circuit_current', label: 'Open Circuit Current', unit: 'A',  hint: 'FC-01 — open circuit', step: '0.01' },
+              { key: 'overcurrent_ratio',    label: 'Overcurrent Ratio',    unit: '×',  hint: 'FC-03 — overcurrent', step: '0.05' },
             ],
           },
           {
-            group: 'Baseline Comparison Ratios',
-            color: '#f97316',
-            icon: '📊',
-            items: [
-              { key: 'led_fault_lower_ratio',    label: 'LED Fault Lower Ratio',         unit: '×', desc: 'I < baseline × this → FC-02' },
-              { key: 'underpowered_upper_ratio',  label: 'Underpowered Upper Ratio',      unit: '×', desc: 'I between lower–upper → FC-05' },
-              { key: 'low_pf_threshold',          label: 'Low Power Factor Threshold',    unit: 'PF', desc: 'PF below this → FC-04' },
+            title: 'Baseline Ratios',
+            Icon: BarChart3,
+            color: '#3b82f6',
+            fields: [
+              { key: 'led_fault_lower_ratio',   label: 'LED Fault Lower Ratio',    unit: '×',  hint: 'FC-02 — LED failure', step: '0.05' },
+              { key: 'underpowered_upper_ratio', label: 'Underpowered Upper Ratio', unit: '×',  hint: 'FC-05 — underpowered', step: '0.05' },
+              { key: 'low_pf_threshold',         label: 'Low Power Factor',         unit: 'PF', hint: 'FC-04 — poor PF', step: '0.01' },
             ],
           },
           {
-            group: 'Baseline Learning',
-            color: '#22c55e',
-            icon: '🎓',
-            items: [
-              { key: 'baseline_learning_packets', label: 'Baseline Learning Packets',  unit: 'n', desc: 'Stable ON-state packets needed to establish baseline' },
-              { key: 'baseline_pf_min',           label: 'Min PF for Baseline Sample', unit: 'PF', desc: 'Sample with PF below this is excluded from baseline' },
-              { key: 'baseline_current_min',      label: 'Min Current for Baseline',   unit: 'A',  desc: 'Noise floor — samples below this are excluded' },
+            title: 'Baseline Learning',
+            Icon: BrainCircuit,
+            color: '#3b82f6',
+            fields: [
+              { key: 'baseline_learning_packets', label: 'Learning Packets',   unit: 'n',  hint: 'ON-state samples required', step: '1' },
+              { key: 'baseline_pf_min',           label: 'Min PF for Sample',  unit: 'PF', hint: 'Below this — skip sample', step: '0.05' },
+              { key: 'baseline_current_min',      label: 'Min Current (noise floor)', unit: 'A',  hint: 'Below this — skip sample', step: '0.01' },
             ],
           },
           {
-            group: 'Debounce & Startup Cycling',
-            color: '#a855f7',
-            icon: '🔁',
-            items: [
-              { key: 'debounce_count',      label: 'Debounce Count',             unit: 'n',  desc: 'Consecutive matching samples before alert fires' },
-              { key: 'cycling_spike_count', label: 'Startup Cycling Spike Count',unit: 'n',  desc: 'Spikes in window before FC-06' },
-              { key: 'cycling_window_ms',   label: 'Cycling Detection Window',   unit: 'ms', desc: 'Time window for counting startup spikes (e.g. 60000 = 60s)' },
+            title: 'Debounce & Cycling',
+            Icon: Repeat,
+            color: '#3b82f6',
+            fields: [
+              { key: 'debounce_count',      label: 'Debounce Count',       unit: 'n',  hint: 'Consecutive faults before alert', step: '1' },
+              { key: 'cycling_spike_count', label: 'Cycling Spike Count',  unit: 'n',  hint: 'FC-06 — spikes in window', step: '1' },
+              { key: 'cycling_window_ms',   label: 'Cycling Window',       unit: 'ms', hint: 'e.g. 60000 = 60 seconds', step: '1000' },
             ],
           },
         ];
@@ -883,146 +887,329 @@ export default function DeviceDetail() {
           try {
             const res = await saveFaultConfig(id, faultCfgEdit);
             setFaultCfgData(d => ({ ...d, saved: res.data.saved, effective: res.data.effective }));
-            setFaultCfgMsg({ type: 'ok', text: '✅ Fault thresholds saved successfully.' });
+            setFaultCfgMsg({ type: 'ok', text: 'Thresholds saved.' });
           } catch (e) {
-            setFaultCfgMsg({ type: 'err', text: '❌ Failed to save thresholds.' });
+            setFaultCfgMsg({ type: 'err', text: 'Failed to save.' });
           }
           setFaultCfgSaving(false);
         };
 
         const handleRestoreDefaults = async () => {
-          if (!confirm('Restore this device to system default thresholds?')) return;
+          if (!confirm('Restore to system defaults?')) return;
           try {
             await restoreFaultDefaults(id);
             await fetchFaultConfig();
-            setFaultCfgMsg({ type: 'ok', text: '✅ Restored to system defaults.' });
+            setFaultCfgMsg({ type: 'ok', text: 'Restored to defaults.' });
           } catch (e) {
-            setFaultCfgMsg({ type: 'err', text: '❌ Failed to restore defaults.' });
+            setFaultCfgMsg({ type: 'err', text: 'Failed to restore.' });
           }
         };
 
         const handleResetBaseline = async () => {
-          if (!confirm('Reset learned baseline current for this device? It will re-learn on next packets.')) return;
+          if (!confirm('Reset learned baseline? Will re-learn on next packets.')) return;
           try {
             const res = await resetFaultBaseline(id);
-            setFaultCfgMsg({ type: 'ok', text: `✅ ${res.data.message}` });
+            setFaultCfgMsg({ type: 'ok', text: res.data.message || 'Baseline reset.' });
           } catch (e) {
-            setFaultCfgMsg({ type: 'err', text: '❌ Failed to reset baseline.' });
+            setFaultCfgMsg({ type: 'err', text: 'Failed to reset baseline.' });
           }
         };
 
+        const customCount = Object.values(faultCfgEdit).filter(v => v !== undefined && v !== '').length;
+
+        const ROW = {
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '0 32px',
+          alignItems: 'center',
+          padding: '10px 0',
+          borderBottom: '1px solid rgba(59,130,246,0.08)',
+        };
+
         return (
-          <div>
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div>
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>⚙️ LED Fault Detection — Per-Device Thresholds</h2>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                  Customize fault detection sensitivity for <strong>{device.uid}</strong>. Empty fields inherit system defaults.
-                </p>
+          <div style={{ maxWidth: 1200 }}>
+
+            {/* ── Page Header ── */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+              flexWrap: 'wrap', gap: 12, marginBottom: 20,
+              paddingBottom: 16, borderBottom: '1px solid var(--border)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3b82f6',
+                }}>
+                  <SlidersHorizontal size={18} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    LED Fault Detection Thresholds
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                    Device: <span style={{ color: '#3b82f6', fontWeight: 600 }}>{device.uid}</span>
+                    {customCount > 0 && (
+                      <span style={{
+                        marginLeft: 10, fontSize: 11, fontWeight: 600,
+                        padding: '1px 8px', borderRadius: 10,
+                        background: 'rgba(59,130,246,0.12)', color: '#60a5fa',
+                        border: '1px solid rgba(59,130,246,0.25)',
+                      }}>
+                        {customCount} custom override{customCount > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-secondary btn-sm" onClick={handleResetBaseline}>
-                  🔄 Reset Learned Baseline
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  onClick={handleResetBaseline}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '7px 13px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    background: 'transparent', border: '1px solid var(--border)',
+                    color: 'var(--text-secondary)', transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#3b82f6'; e.currentTarget.style.color = '#60a5fa'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                >
+                  <RotateCcw size={13} /> Reset Baseline
                 </button>
-                <button className="btn btn-secondary btn-sm" onClick={handleRestoreDefaults}>
-                  ↩ Restore Defaults
+                <button
+                  onClick={handleRestoreDefaults}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '7px 13px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    background: 'transparent', border: '1px solid var(--border)',
+                    color: 'var(--text-secondary)', transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#3b82f6'; e.currentTarget.style.color = '#60a5fa'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                >
+                  <Undo2 size={13} /> Restore Defaults
                 </button>
-                <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={faultCfgSaving}>
-                  {faultCfgSaving ? 'Saving…' : '💾 Save Thresholds'}
+                <button
+                  onClick={handleSave}
+                  disabled={faultCfgSaving}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '7px 18px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                    background: '#2563eb', border: '1px solid #3b82f6',
+                    color: '#fff', transition: 'all 0.15s',
+                    opacity: faultCfgSaving ? 0.6 : 1,
+                  }}
+                  onMouseEnter={e => { if (!faultCfgSaving) e.currentTarget.style.background = '#1d4ed8'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#2563eb'; }}
+                >
+                  <Save size={13} /> {faultCfgSaving ? 'Saving…' : 'Save Thresholds'}
                 </button>
               </div>
             </div>
 
-            {/* Status Message */}
+            {/* ── Status Banner ── */}
             {faultCfgMsg && (
               <div style={{
-                padding: '8px 14px', borderRadius: 8, marginBottom: 16, fontSize: 12, fontWeight: 600,
-                background: faultCfgMsg.type === 'ok' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
-                border: `1px solid ${faultCfgMsg.type === 'ok' ? '#22c55e' : '#ef4444'}`,
-                color: faultCfgMsg.type === 'ok' ? '#22c55e' : '#ef4444',
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '9px 14px', borderRadius: 7, marginBottom: 16, fontSize: 12, fontWeight: 600,
+                background: faultCfgMsg.type === 'ok' ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)',
+                border: `1px solid ${faultCfgMsg.type === 'ok' ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                color: faultCfgMsg.type === 'ok' ? '#4ade80' : '#f87171',
               }}>
+                {faultCfgMsg.type === 'ok' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
                 {faultCfgMsg.text}
               </div>
             )}
 
-            {/* Threshold Groups */}
-            {FIELDS.map(group => (
-              <div key={group.group} className="card" style={{ marginBottom: 16 }}>
-                <div className="card-header">
-                  <div className="card-title" style={{ color: group.color }}>
-                    {group.icon} {group.group}
-                  </div>
-                </div>
-                <div className="card-body" style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-                    {group.items.map(f => {
-                      const hasOverride = faultCfgEdit[f.key] !== undefined && faultCfgEdit[f.key] !== '';
-                      return (
-                        <div key={f.key}>
-                          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
-                            {f.label}
-                            {hasOverride && (
-                              <span style={{ marginLeft: 6, fontSize: 10, background: 'rgba(168,85,247,0.15)', color: '#a855f7', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>CUSTOM</span>
-                            )}
-                          </label>
-                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                            <input
-                              type="number"
-                              step="any"
-                              className="form-input"
-                              style={{ flex: 1 }}
-                              value={faultCfgEdit[f.key] ?? ''}
-                              placeholder={`Default: ${defaults[f.key]}`}
-                              onChange={e => {
-                                const val = e.target.value;
-                                setFaultCfgEdit(prev => ({
-                                  ...prev,
-                                  [f.key]: val === '' ? undefined : parseFloat(val),
-                                }));
-                              }}
-                            />
-                            <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 30 }}>{f.unit}</span>
-                            {hasOverride && (
-                              <button
-                                title="Clear override (use default)"
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1 }}
-                                onClick={() => setFaultCfgEdit(prev => { const n = { ...prev }; delete n[f.key]; return n; })}
-                              >✕</button>
-                            )}
-                          </div>
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
-                            {f.desc} · Effective: <strong style={{ color: group.color }}>{effective[f.key]}{f.unit !== 'n' ? ` ${f.unit}` : ''}</strong>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* Current Effective Config Summary */}
-            <div className="card">
-              <div className="card-header"><div className="card-title">📋 Current Effective Configuration</div></div>
-              <div className="card-body" style={{ padding: '16px 20px' }}>
-                <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
-                  These are the actual thresholds currently being used by the fault detection engine for this device.
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
-                  {Object.entries(effective).map(([key, val]) => (
-                    <div key={key} style={{
-                      padding: '8px 12px', borderRadius: 8,
-                      background: faultCfgEdit[key] !== undefined ? 'rgba(168,85,247,0.08)' : 'var(--bg-secondary)',
-                      border: `1px solid ${faultCfgEdit[key] !== undefined ? 'rgba(168,85,247,0.3)' : 'var(--border)'}`,
+            {/* ── 2-Column Sections Grid (Left: Voltage & Current, Baseline Learning | Right: Baseline Ratios, Debounce & Cycling) ── */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
+              gap: 16,
+              marginBottom: 16,
+            }}>
+              {SECTIONS.map(section => {
+                const SIcon = section.Icon;
+                return (
+                  <div key={section.title} style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 10,
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }}>
+                    {/* Section Header */}
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 9,
+                      padding: '11px 16px',
+                      background: 'rgba(59,130,246,0.05)',
+                      borderBottom: '1px solid rgba(59,130,246,0.12)',
                     }}>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{key}</div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: faultCfgEdit[key] !== undefined ? '#a855f7' : 'var(--text-primary)' }}>{val}</div>
+                      <SIcon size={15} style={{ color: '#3b82f6' }} />
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.01em' }}>
+                        {section.title}
+                      </span>
                     </div>
-                  ))}
+
+                    {/* Form Rows */}
+                    <div style={{ padding: '6px 16px 10px', flex: 1 }}>
+                      {section.fields.map((f, idx) => {
+                        const hasOverride = faultCfgEdit[f.key] !== undefined && faultCfgEdit[f.key] !== '';
+                        const isLast = idx === section.fields.length - 1;
+                        return (
+                          <div key={f.key} style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: 12,
+                            padding: '10px 0',
+                            borderBottom: isLast ? 'none' : '1px solid rgba(255,255,255,0.04)',
+                          }}>
+                            {/* Left: Label & Effective info */}
+                            <div style={{ flex: 1, minWidth: 0, paddingRight: 6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                                  {f.label}
+                                </span>
+                                {hasOverride && (
+                                  <span style={{
+                                    fontSize: 9, fontWeight: 700,
+                                    padding: '1px 5px', borderRadius: 4,
+                                    background: 'rgba(59,130,246,0.15)', color: '#60a5fa',
+                                    border: '1px solid rgba(59,130,246,0.3)',
+                                  }}>
+                                    CUSTOM
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{
+                                fontSize: 11, color: 'var(--text-muted)', marginTop: 2,
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                              }} title={f.hint}>
+                                {f.hint} · <span style={{ color: '#60a5fa', fontWeight: 600 }}>eff: {effective[f.key]} {f.unit !== 'n' ? f.unit : ''}</span>
+                              </div>
+                            </div>
+
+                            {/* Right: Input + Clear Button */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: 145, flexShrink: 0 }}>
+                              <div style={{
+                                display: 'flex', alignItems: 'center',
+                                flex: 1,
+                                background: 'var(--bg-primary)',
+                                border: hasOverride ? '1px solid #3b82f6' : '1px solid var(--border)',
+                                borderRadius: 7,
+                                overflow: 'hidden',
+                                height: 34,
+                                transition: 'border-color 0.15s',
+                              }}>
+                                <input
+                                  type="number"
+                                  step={f.step || 'any'}
+                                  value={faultCfgEdit[f.key] ?? ''}
+                                  placeholder={String(defaults[f.key])}
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    setFaultCfgEdit(prev => ({
+                                      ...prev,
+                                      [f.key]: val === '' ? undefined : parseFloat(val),
+                                    }));
+                                  }}
+                                  style={{
+                                    flex: 1, border: 'none', outline: 'none',
+                                    background: 'transparent',
+                                    padding: '0 8px',
+                                    fontSize: 12, fontWeight: 600,
+                                    color: hasOverride ? '#60a5fa' : 'var(--text-primary)',
+                                    width: 0,
+                                  }}
+                                />
+                                <span style={{
+                                  padding: '0 8px', fontSize: 10, fontWeight: 700,
+                                  color: 'var(--text-muted)',
+                                  borderLeft: '1px solid var(--border)',
+                                  height: '100%', display: 'flex', alignItems: 'center',
+                                  background: 'rgba(255,255,255,0.03)',
+                                  minWidth: 32, justifyContent: 'center',
+                                }}>
+                                  {f.unit === 'n' ? '#' : f.unit}
+                                </span>
+                              </div>
+
+                              {hasOverride ? (
+                                <button
+                                  title="Reset to default"
+                                  onClick={() => setFaultCfgEdit(prev => { const n = { ...prev }; delete n[f.key]; return n; })}
+                                  style={{
+                                    width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+                                    color: '#f87171', cursor: 'pointer', transition: 'all 0.15s',
+                                  }}
+                                  onMouseEnter={e => { e.currentTarget.style.background = '#ef4444'; e.currentTarget.style.color = '#fff'; }}
+                                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.1)'; e.currentTarget.style.color = '#f87171'; }}
+                                >
+                                  <X size={12} />
+                                </button>
+                              ) : (
+                                <div style={{ width: 28 }} />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ── Effective Config Summary ── */}
+            <div style={{
+              background: 'var(--bg-card)', border: '1px solid var(--border)',
+              borderRadius: 10, overflow: 'hidden',
+            }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 9,
+                padding: '11px 18px',
+                background: 'rgba(59,130,246,0.05)',
+                borderBottom: '1px solid rgba(59,130,246,0.12)',
+              }}>
+                <ClipboardList size={15} style={{ color: '#3b82f6' }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Active Configuration
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4 }}>
+                  — live values in fault detection engine
+                </span>
+              </div>
+              <div style={{ padding: '14px 18px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+                  {Object.entries(effective).map(([key, val]) => {
+                    const isCustom = faultCfgEdit[key] !== undefined && faultCfgEdit[key] !== '';
+                    return (
+                      <div key={key} style={{
+                        padding: '8px 12px', borderRadius: 7,
+                        background: isCustom ? 'rgba(59,130,246,0.08)' : 'var(--bg-secondary)',
+                        border: `1px solid ${isCustom ? 'rgba(59,130,246,0.25)' : 'var(--border)'}`,
+                      }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          {key.replace(/_/g, ' ')}
+                        </div>
+                        <div style={{
+                          fontSize: 15, fontWeight: 700,
+                          color: isCustom ? '#60a5fa' : 'var(--text-primary)',
+                        }}>
+                          {val}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
+
           </div>
         );
       })()}
