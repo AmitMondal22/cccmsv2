@@ -3,7 +3,8 @@ dotenv.config();
 import bcrypt from 'bcrypt';
 import {
   sequelize, Project, City, Zone, Ward, Street,
-  Device, User, DeviceLatestState, AlertRule,
+  Device, User, DeviceLatestState, Telemetry, AlertRule, Alert,
+  MaintenanceTicket, Notification, AuditLog,
 } from '../models/index.js';
 
 async function seed() {
@@ -12,135 +13,234 @@ async function seed() {
     await sequelize.sync({ alter: true });
     console.log('✅ DB connected and synced');
 
-    // ── Project
-    const [project] = await Project.findOrCreate({
-      where: { code: 'MSL-001' },
-      defaults: { name: 'Mumbai Smart Street Light Project', client: 'Mumbai Municipal Corporation', status: 'active' },
+    // ── Clean up existing old devices & telemetry to ensure only requested seed data exists
+    console.log('🧹 Cleaning old test data...');
+    await Telemetry.destroy({ where: {} });
+    await Alert.destroy({ where: {} });
+    await MaintenanceTicket.destroy({ where: {} });
+    await DeviceLatestState.destroy({ where: {} });
+    await Device.destroy({ where: {} });
+    await Street.destroy({ where: {} });
+    await Ward.destroy({ where: {} });
+    await Zone.destroy({ where: {} });
+    await City.destroy({ where: {} });
+    await Project.destroy({ where: {} });
+
+    // ── Project (Kolkata Municipal Corporation)
+    const project = await Project.create({
+      name: 'Kolkata Smart Street Light Project',
+      code: 'KOL-001',
+      client: 'Kolkata Municipal Corporation (KMC)',
+      status: 'active',
     });
 
-    // ── City
-    const [city] = await City.findOrCreate({
-      where: { name: 'Mumbai', project_id: project.id },
-      defaults: { state: 'Maharashtra', timezone: 'Asia/Kolkata', latitude: 19.0760, longitude: 72.8777 },
+    // ── City (Kolkata)
+    const city = await City.create({
+      name: 'Kolkata',
+      state: 'West Bengal',
+      timezone: 'Asia/Kolkata',
+      latitude: 22.5726,
+      longitude: 88.3639,
+      project_id: project.id,
     });
 
     // ── Zones
-    const zoneData = [
-      { name: 'Zone 01', code: 'Z01' },
-      { name: 'Zone 02', code: 'Z02' },
-    ];
-    const zones = [];
-    for (const z of zoneData) {
-      const [zone] = await Zone.findOrCreate({ where: { name: z.name, city_id: city.id }, defaults: { ...z, city_id: city.id } });
-      zones.push(zone);
-    }
+    const centralZone = await Zone.create({
+      name: 'Central Kolkata',
+      code: 'Z-CENTRAL',
+      city_id: city.id,
+    });
+
+    const southZone = await Zone.create({
+      name: 'South Kolkata',
+      code: 'Z-SOUTH',
+      city_id: city.id,
+    });
+
+    const eastZone = await Zone.create({
+      name: 'Salt Lake / East',
+      code: 'Z-EAST',
+      city_id: city.id,
+    });
+
+    const northZone = await Zone.create({
+      name: 'North Kolkata',
+      code: 'Z-NORTH',
+      city_id: city.id,
+    });
 
     // ── Wards
-    const wardData = [
-      { name: 'Ward 101', number: '101', zone_id: zones[0].id },
-      { name: 'Ward 102', number: '102', zone_id: zones[0].id },
-      { name: 'Ward 201', number: '201', zone_id: zones[1].id },
-      { name: 'Ward 202', number: '202', zone_id: zones[1].id },
-    ];
-    const wards = [];
-    for (const w of wardData) {
-      const [ward] = await Ward.findOrCreate({ where: { name: w.name, zone_id: w.zone_id }, defaults: w });
-      wards.push(ward);
-    }
+    const ward63 = await Ward.create({
+      name: 'Ward 63 (Park Street)',
+      number: '63',
+      zone_id: centralZone.id,
+    });
+
+    const ward70 = await Ward.create({
+      name: 'Ward 70 (Bhowanipore)',
+      number: '70',
+      zone_id: southZone.id,
+    });
+
+    const ward31 = await Ward.create({
+      name: 'Ward 31 (Salt Lake Sector V)',
+      number: '31',
+      zone_id: eastZone.id,
+    });
+
+    const ward05 = await Ward.create({
+      name: 'Ward 05 (Shyambazar)',
+      number: '05',
+      zone_id: northZone.id,
+    });
 
     // ── Streets
-    const streetData = [
-      { name: 'MG Road', ward_id: wards[0].id },
-      { name: 'Andheri East', ward_id: wards[0].id },
-      { name: 'Marol', ward_id: wards[0].id },
-      { name: 'Station Road', ward_id: wards[1].id },
-      { name: 'Market Road', ward_id: wards[2].id },
-      { name: 'Main Road', ward_id: wards[3].id },
-    ];
-    const streets = [];
-    for (const s of streetData) {
-      const [street] = await Street.findOrCreate({ where: { name: s.name, ward_id: s.ward_id }, defaults: s });
-      streets.push(street);
-    }
+    const parkStreet = await Street.create({
+      name: 'Park Street (Mother Teresa Sarani)',
+      ward_id: ward63.id,
+    });
 
-    // ── Devices (25 devices spread across streets)
+    const camacStreet = await Street.create({
+      name: 'Camac Street (Abanindranath Tagore Sarani)',
+      ward_id: ward63.id,
+    });
+
+    const chowringheeRoad = await Street.create({
+      name: 'Chowringhee Road (Jawaharlal Nehru Road)',
+      ward_id: ward63.id,
+    });
+
+    const sectorVStreet = await Street.create({
+      name: 'Sector V Ring Road',
+      ward_id: ward31.id,
+    });
+
+    const shyambazarStreet = await Street.create({
+      name: 'Bhupen Bose Avenue',
+      ward_id: ward05.id,
+    });
+
+    // ── Devices: ONLY TS00000001 and TS00000002 in Kolkata
     const deviceDefs = [
-      { uid: 'TS00000001', name: 'SL-MUM-00001', street_id: streets[0].id, lat: 19.1197, lng: 72.8468, light: 'on', conn: 'online' },
-      { uid: 'TS00000002', name: 'SL-MUM-00002', street_id: streets[0].id, lat: 19.1200, lng: 72.8470, light: 'on', conn: 'online' },
-      { uid: 'TS00000003', name: 'SL-MUM-00003', street_id: streets[0].id, lat: 19.1203, lng: 72.8472, light: 'on', conn: 'online' },
-      { uid: 'TS00000004', name: 'SL-MUM-00004', street_id: streets[0].id, lat: 19.1206, lng: 72.8474, light: 'off', conn: 'offline' },
-      { uid: 'TS00000005', name: 'SL-MUM-00005', street_id: streets[1].id, lat: 19.1182, lng: 72.8459, light: 'on', conn: 'online' },
-      { uid: 'TS00000006', name: 'SL-MUM-00006', street_id: streets[1].id, lat: 19.1185, lng: 72.8461, light: 'on', conn: 'online' },
-      { uid: 'TS00000007', name: 'SL-MUM-00007', street_id: streets[1].id, lat: 19.1188, lng: 72.8463, light: 'on', conn: 'warning' },
-      { uid: 'TS00000008', name: 'SL-MUM-00008', street_id: streets[2].id, lat: 19.1175, lng: 72.8450, light: 'on', conn: 'online' },
-      { uid: 'TS00000009', name: 'SL-MUM-00009', street_id: streets[2].id, lat: 19.1178, lng: 72.8452, light: 'off', conn: 'offline' },
-      { uid: 'TS00000010', name: 'SL-MUM-00010', street_id: streets[2].id, lat: 19.1181, lng: 72.8454, light: 'on', conn: 'online' },
-      { uid: 'TS00000011', name: 'SL-MUM-00011', street_id: streets[3].id, lat: 19.1160, lng: 72.8440, light: 'on', conn: 'online' },
-      { uid: 'TS00000012', name: 'SL-MUM-00012', street_id: streets[3].id, lat: 19.1163, lng: 72.8442, light: 'on', conn: 'online' },
-      { uid: 'TS00000013', name: 'SL-MUM-00013', street_id: streets[3].id, lat: 19.1166, lng: 72.8444, light: 'on', conn: 'online' },
-      { uid: 'TS00000014', name: 'SL-MUM-00014', street_id: streets[3].id, lat: 19.1169, lng: 72.8446, light: 'off', conn: 'offline' },
-      { uid: 'TS00000015', name: 'SL-MUM-00015', street_id: streets[4].id, lat: 19.1145, lng: 72.8430, light: 'on', conn: 'online' },
-      { uid: 'TS00000016', name: 'SL-MUM-00016', street_id: streets[4].id, lat: 19.1148, lng: 72.8432, light: 'on', conn: 'online' },
-      { uid: 'TS00000017', name: 'SL-MUM-00017', street_id: streets[4].id, lat: 19.1151, lng: 72.8434, light: 'on', conn: 'online' },
-      { uid: 'TS00000018', name: 'SL-MUM-00018', street_id: streets[4].id, lat: 19.1154, lng: 72.8436, light: 'on', conn: 'warning' },
-      { uid: 'TS00000019', name: 'SL-MUM-00019', street_id: streets[5].id, lat: 19.1130, lng: 72.8420, light: 'on', conn: 'online' },
-      { uid: 'TS00000020', name: 'SL-MUM-00020', street_id: streets[5].id, lat: 19.1133, lng: 72.8422, light: 'on', conn: 'online' },
-      { uid: 'TS00000021', name: 'SL-MUM-00021', street_id: streets[5].id, lat: 19.1136, lng: 72.8424, light: 'off', conn: 'offline' },
-      { uid: 'TS00000022', name: 'SL-MUM-00022', street_id: streets[0].id, lat: 19.1209, lng: 72.8476, light: 'on', conn: 'online' },
-      { uid: 'TS00000023', name: 'SL-MUM-00023', street_id: streets[1].id, lat: 19.1191, lng: 72.8465, light: 'on', conn: 'online' },
-      { uid: 'TS00000024', name: 'SL-MUM-00024', street_id: streets[2].id, lat: 19.1184, lng: 72.8456, light: 'on', conn: 'online' },
-      { uid: 'TS00000025', name: 'SL-MUM-00025', street_id: streets[3].id, lat: 19.1172, lng: 72.8448, light: 'on', conn: 'online' },
+      {
+        uid: 'TS00000001',
+        name: 'SL-KOL-00001',
+        serial_number: 'SN-TS00000001',
+        street_id: parkStreet.id,
+        latitude: 22.5535,
+        longitude: 88.3518,
+        installation_date: '2025-01-15',
+        device_model: 'TLX-3000-KOL',
+        firmware_version: '2.1.0',
+        rated_voltage: 230,
+        rated_power: 60,
+        status: 'active',
+        connectivity_status: 'online',
+        light_status: 'on',
+        health_status: 'normal',
+        last_seen: new Date(),
+        voltage: 238.40,
+        current: 0.2610,
+        real_power: 62.22,
+        pf: 0.94,
+        kwh: 14.8520,
+        run_hours: 48.5,
+      },
+      {
+        uid: 'TS00000002',
+        name: 'SL-KOL-00002',
+        serial_number: 'SN-TS00000002',
+        street_id: camacStreet.id,
+        latitude: 22.5510,
+        longitude: 88.3530,
+        installation_date: '2025-01-15',
+        device_model: 'TLX-3000-KOL',
+        firmware_version: '2.1.0',
+        rated_voltage: 230,
+        rated_power: 60,
+        status: 'active',
+        connectivity_status: 'online',
+        light_status: 'on',
+        health_status: 'normal',
+        last_seen: new Date(),
+        voltage: 240.15,
+        current: 0.2540,
+        real_power: 61.00,
+        pf: 0.93,
+        kwh: 12.3140,
+        run_hours: 42.0,
+      },
     ];
 
     const devices = [];
     for (const d of deviceDefs) {
-      const [device] = await Device.findOrCreate({
-        where: { uid: d.uid },
-        defaults: {
-          name: d.name,
-          serial_number: `SN-${d.uid}`,
-          street_id: d.street_id,
-          latitude: d.lat,
-          longitude: d.lng,
-          installation_date: '2025-01-15',
-          device_model: 'TLX-3000',
-          firmware_version: '1.2.5',
-          rated_voltage: 230,
-          rated_power: 40,
-          status: 'active',
-          connectivity_status: d.conn,
-          light_status: d.light,
-          health_status: d.conn === 'offline' ? 'fault' : 'normal',
-          last_seen: d.conn === 'offline' ? new Date(Date.now() - 15 * 60000) : new Date(Date.now() - Math.random() * 60000),
-        },
+      const device = await Device.create({
+        uid: d.uid,
+        name: d.name,
+        serial_number: d.serial_number,
+        street_id: d.street_id,
+        latitude: d.latitude,
+        longitude: d.longitude,
+        installation_date: d.installation_date,
+        device_model: d.device_model,
+        firmware_version: d.firmware_version,
+        rated_voltage: d.rated_voltage,
+        rated_power: d.rated_power,
+        status: d.status,
+        connectivity_status: d.connectivity_status,
+        light_status: d.light_status,
+        health_status: d.health_status,
+        last_seen: d.last_seen,
       });
 
-      // Create latest state
-      const voltage = d.conn === 'offline' ? 0 : (240 + Math.random() * 20 - 10);
-      const current = d.light === 'on' ? (0.18 + Math.random() * 0.12) : 0;
-      const power = current * voltage;
+      // Latest State
+      await DeviceLatestState.create({
+        device_id: device.id,
+        voltage: d.voltage,
+        current: d.current,
+        real_power: d.real_power,
+        pf: d.pf,
+        kwh: d.kwh,
+        run_hours: d.run_hours,
+        frequency: 50.00,
+        light_status: 1,
+        relay_status: 1,
+        fault: 0,
+        packet_timestamp: new Date(),
+        server_timestamp: new Date(),
+        packets_today: 720,
+        packets_total: 15420,
+      });
 
-      await DeviceLatestState.findOrCreate({
-        where: { device_id: device.id },
-        defaults: {
+      // Generate initial telemetry history points for reports & charts
+      const now = Date.now();
+      const telemetryEntries = [];
+      for (let i = 24; i >= 0; i--) {
+        const time = new Date(now - i * 3600 * 1000);
+        const isNight = time.getHours() < 6 || time.getHours() >= 18;
+        const v = 235 + Math.random() * 8;
+        const c = isNight ? (0.24 + Math.random() * 0.03) : 0;
+        const p = v * c;
+
+        telemetryEntries.push({
           device_id: device.id,
-          voltage: d.conn === 'offline' ? 0 : parseFloat(voltage.toFixed(2)),
-          current: parseFloat(current.toFixed(4)),
-          real_power: parseFloat(power.toFixed(4)),
-          pf: d.light === 'on' ? 0.85 + Math.random() * 0.1 : 0,
-          kwh: parseFloat((Math.random() * 5).toFixed(4)),
-          run_hours: parseFloat((Math.random() * 12).toFixed(2)),
+          uid: d.uid,
+          packet_timestamp: time,
+          server_timestamp: time,
+          voltage: parseFloat(v.toFixed(2)),
+          current: parseFloat(c.toFixed(4)),
+          real_power: parseFloat(p.toFixed(4)),
+          pf: isNight ? 0.93 : 0,
           frequency: 50.00,
-          light_status: d.light === 'on' ? 1 : 0,
-          relay_status: d.light === 'on' ? 1 : 0,
-          fault: d.conn === 'offline' ? 1 : 0,
-          packet_timestamp: new Date(),
-          server_timestamp: new Date(),
-          packets_today: Math.floor(Math.random() * 1440),
-          packets_total: Math.floor(Math.random() * 50000),
-        },
-      });
+          kwh: parseFloat((d.kwh - (i * 0.05)).toFixed(4)),
+          run_hours: parseFloat((d.run_hours - (i * 0.1)).toFixed(2)),
+          light_status: isNight ? 1 : 0,
+          relay_status: isNight ? 1 : 0,
+          fault: 0,
+        });
+      }
 
+      await Telemetry.bulkCreate(telemetryEntries);
       devices.push(device);
     }
 
@@ -163,12 +263,12 @@ async function seed() {
     await User.findOrCreate({
       where: { email: 'tech@techavo.com' },
       defaults: {
-        name: 'Raj Kumar',
+        name: 'Subhashish Ghosh',
         email: 'tech@techavo.com',
         password_hash: techHash,
         role: 'maintenance_user',
         scope_type: 'ward',
-        scope_id: wards[0].id,
+        scope_id: ward63.id,
         is_active: true,
       },
     });
@@ -192,11 +292,13 @@ async function seed() {
       });
     }
 
-    console.log('✅ Seed complete!');
+    console.log('✅ Kolkata Seed complete!');
     console.log('');
-    console.log('📧 Super Admin:  admin@techavo.com  /  Admin@123');
-    console.log('🔧 Technician:   tech@techavo.com   /  Tech@123');
-    console.log(`📦 Devices seeded: ${devices.length}`);
+    console.log('🏛️ City:        Kolkata (West Bengal, India)');
+    console.log('📍 Location:    Park Street / Camac Street (Ward 63)');
+    console.log('📦 Seeded UIDs: TS00000001, TS00000002');
+    console.log('📧 Super Admin: admin@techavo.com  /  Admin@123');
+    console.log('🔧 Technician:  tech@techavo.com   /  Tech@123');
 
     process.exit(0);
   } catch (err) {

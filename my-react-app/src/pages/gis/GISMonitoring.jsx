@@ -277,8 +277,8 @@ export default function GISMonitoring() {
     if (valid.length > 0) {
       recalculateBounds(valid);
     } else {
-      setMapTarget([19.1197, 72.8468]);
-      setMapZoom(13);
+      setMapTarget([22.5726, 88.3639]);
+      setMapZoom(14);
     }
   };
 
@@ -315,7 +315,7 @@ export default function GISMonitoring() {
   }, [filteredDevices]);
 
   const activeTileConfig = TILE_PROVIDERS.find(t => t.id === tileLayer) || TILE_PROVIDERS[0];
-  const initialCenter = [19.1197, 72.8468];
+  const initialCenter = [22.5535, 88.3518];
 
   return (
     <div>

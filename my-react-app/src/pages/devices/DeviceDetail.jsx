@@ -453,8 +453,8 @@ export default function DeviceDetail() {
                 ['Zone',      device.street?.ward?.zone?.name || '—'],
                 ['Ward',      device.street?.ward?.name || '—'],
                 ['Street',    device.street?.name || '—'],
-                ['Latitude',  device.latitude || '19.1197'],
-                ['Longitude', device.longitude || '72.8468'],
+                ['Latitude',  device.latitude || '22.5535'],
+                ['Longitude', device.longitude || '88.3518'],
                 ['GPS Accuracy', 'High (< 2.5m)'],
                 ['Mounting Type', 'Pole Arm Mount (8m height)'],
               ].map(([k, v]) => (
