@@ -56,113 +56,33 @@ async function isRuleApplicable(rule, device) {
   return true;
 }
 
+const SEVERITY_WEIGHT = {
+  critical: 4,
+  major: 3,
+  warning: 2,
+  info: 1,
+};
+
+const SCOPE_WEIGHT = {
+  device: 5,
+  street: 4,
+  ward: 3,
+  zone: 2,
+  city: 1,
+  global: 0,
+};
+
 /**
- * Evaluate all active alert rules against a telemetry packet.
- * Creates/recovers alerts, sends emails, creates maintenance tickets.
+ * Evaluate device fault config and active alert rules against a telemetry packet.
+ * Priority:
+ *  1. Device Fault Config (FC-01 to FC-07 Intelligent Hardware Matrix) evaluates FIRST.
+ *  2. If hardware fault is active/detected, generic cascading rule alerts are suppressed.
+ *  3. When multiple rules cross thresholds at once, ONLY ONE primary (highest severity / most specific) alert is generated.
+ *  4. Prevents duplicate spam and multiple tickets for the same device at the same time.
  */
 export async function evaluateAlertRules(device, telemetry) {
-  const rules = await AlertRule.findAll({ where: { is_active: true } });
-
-  for (const rule of rules) {
-    // Check scope applicability
-    const applicable = await isRuleApplicable(rule, device);
-    if (!applicable) {
-      continue;
-    }
-
-    const conditionMet = evaluateCondition(rule, telemetry, device);
-
-    if (conditionMet) {
-      // Check if open alert already exists for this device+rule
-      const existing = await Alert.findOne({
-        where: {
-          device_id: device.id,
-          rule_id: rule.id,
-          status: { [Op.in]: ['open', 'acknowledged', 'assigned', 'in_progress'] },
-        },
-      });
-
-      if (!existing) {
-        const alert = await Alert.create({
-          device_id: device.id,
-          rule_id: rule.id,
-          alert_type: rule.alert_type || rule.name.toLowerCase().replace(/\s+/g, '_'),
-          severity: rule.severity,
-          status: 'open',
-          message: `${rule.name} on device ${device.uid} (${device.name || ''})`,
-          voltage_at_alert: telemetry.voltage,
-          current_at_alert: telemetry.current,
-          power_at_alert: telemetry.real_power,
-          detected_at: new Date(),
-        });
-
-        // Notification
-        await Notification.create({
-          type: 'alert',
-          title: rule.name,
-          message: `${rule.name} detected on ${device.uid} - ${device.name || ''}`,
-          severity: rule.severity,
-          ref_type: 'alert',
-          ref_id: alert.id,
-        });
-
-        // Email
-        if (rule.action_send_email && rule.email_recipients) {
-          const recipients = rule.email_recipients.split(',').map(e => e.trim());
-          await sendAlertEmail({ device, alert, recipients });
-        }
-
-        // Auto-create ticket
-        if (rule.action_create_ticket) {
-          const ticketNum = `TKT-${Date.now()}`;
-          await MaintenanceTicket.create({
-            ticket_number: ticketNum,
-            device_id: device.id,
-            alert_id: alert.id,
-            title: `Auto: ${rule.name} - ${device.uid}`,
-            description: `Automatically created from alert rule: ${rule.name} (Scope: ${rule.scope_type || 'global'})`,
-            problem_type: rule.alert_type || 'fault',
-            priority: rule.severity === 'critical' ? 'critical' : rule.severity === 'major' ? 'high' : 'medium',
-            status: 'open',
-          });
-        }
-
-        console.log(`[Alert] Created: ${rule.name} for ${device.uid}`);
-      }
-    } else {
-      // Condition NOT met — check for auto-recovery
-      const existingOpen = await Alert.findOne({
-        where: {
-          device_id: device.id,
-          rule_id: rule.id,
-          status: { [Op.in]: ['open', 'acknowledged'] },
-          auto_recovered: false,
-        },
-      });
-
-      if (existingOpen) {
-        await existingOpen.update({
-          status: 'auto_recovered',
-          auto_recovered: true,
-          resolved_at: new Date(),
-          resolution_notes: 'Auto-recovered: condition cleared by telemetry',
-        });
-
-        await Notification.create({
-          type: 'recovery',
-          title: `Fault Recovered: ${rule.name}`,
-          message: `${rule.name} auto-recovered on ${device.uid}`,
-          severity: 'info',
-          ref_type: 'alert',
-          ref_id: existingOpen.id,
-        });
-
-        console.log(`[Alert] Auto-recovered: ${rule.name} for ${device.uid}`);
-      }
-    }
-  }
-
-  // ── LED Intelligent Fault Detection (runs after rule-based evaluation) ──────
+  // ── 1. DEVICE FAULT CONFIG & HARDWARE ENGINE EVALUATES FIRST ───────────────
+  let ledFaultActive = false;
   try {
     const ledVerdict = evaluateLEDFaults(device, telemetry);
 
@@ -195,6 +115,7 @@ export async function evaluateAlertRules(device, telemetry) {
         }
       } else {
         // Raise a new LED fault alert (only if not already open)
+        ledFaultActive = true;
         const existingLedAlert = await Alert.findOne({
           where: {
             device_id: device.id,
@@ -226,18 +147,26 @@ export async function evaluateAlertRules(device, telemetry) {
             ref_id: ledAlert.id,
           });
 
-          // Auto-create maintenance ticket for critical LED faults
+          // Auto-create maintenance ticket for critical/major LED faults (check if open ticket already exists for device)
           if (ledVerdict.severity === 'critical' || ledVerdict.severity === 'major') {
-            await MaintenanceTicket.create({
-              ticket_number: `TKT-LED-${Date.now()}`,
-              device_id: device.id,
-              alert_id: ledAlert.id,
-              title: `Auto: ${ledVerdict.faultCode} — ${ledVerdict.faultName} on ${device.uid}`,
-              description: `LED fault automatically detected.\nFault Code: ${ledVerdict.faultCode}\nCategory: ${ledVerdict.faultName}\nDetail: ${ledVerdict.detail}`,
-              problem_type: 'fault',
-              priority: ledVerdict.severity === 'critical' ? 'critical' : 'high',
-              status: 'open',
+            const existingOpenTicket = await MaintenanceTicket.findOne({
+              where: {
+                device_id: device.id,
+                status: { [Op.in]: ['open', 'assigned', 'in_progress'] }
+              }
             });
+            if (!existingOpenTicket) {
+              await MaintenanceTicket.create({
+                ticket_number: `TKT-LED-${Date.now()}`,
+                device_id: device.id,
+                alert_id: ledAlert.id,
+                title: `Auto: ${ledVerdict.faultCode} — ${ledVerdict.faultName} on ${device.uid}`,
+                description: `LED fault automatically detected.\nFault Code: ${ledVerdict.faultCode}\nCategory: ${ledVerdict.faultName}\nDetail: ${ledVerdict.detail}`,
+                problem_type: 'fault',
+                priority: ledVerdict.severity === 'critical' ? 'critical' : 'high',
+                status: 'open',
+              });
+            }
           }
 
           console.log(`[Alert] LED fault raised: ${ledVerdict.faultCode} (${ledVerdict.severity}) for ${device.uid}`);
@@ -247,6 +176,175 @@ export async function evaluateAlertRules(device, telemetry) {
   } catch (ledErr) {
     console.error(`[LED FAULT ENGINE ERROR]: ${ledErr.message}`);
   }
+
+  // Check if any open LED hardware alert currently exists on this device
+  if (!ledFaultActive) {
+    const existingOpenLed = await Alert.findOne({
+      where: {
+        device_id: device.id,
+        alert_type: { [Op.like]: 'led_fault_%' },
+        status: { [Op.in]: ['open', 'acknowledged', 'assigned', 'in_progress'] },
+      },
+    });
+    if (existingOpenLed) {
+      ledFaultActive = true;
+    }
+  }
+
+  // ── 2. EVALUATE USER-DEFINED ALERT RULES ──────────────────────────────────
+  const rules = await AlertRule.findAll({ where: { is_active: true } });
+  const matchedRules = [];
+
+  for (const rule of rules) {
+    // Check scope applicability
+    const applicable = await isRuleApplicable(rule, device);
+    if (!applicable) {
+      continue;
+    }
+
+    const conditionMet = evaluateCondition(rule, telemetry, device);
+
+    if (conditionMet) {
+      matchedRules.push(rule);
+    } else {
+      // Condition NOT met — auto-recover any previous open alert for this specific rule
+      const existingOpen = await Alert.findOne({
+        where: {
+          device_id: device.id,
+          rule_id: rule.id,
+          status: { [Op.in]: ['open', 'acknowledged'] },
+          auto_recovered: false,
+        },
+      });
+
+      if (existingOpen) {
+        await existingOpen.update({
+          status: 'auto_recovered',
+          auto_recovered: true,
+          resolved_at: new Date(),
+          resolution_notes: 'Auto-recovered: condition cleared by telemetry',
+        });
+
+        await Notification.create({
+          type: 'recovery',
+          title: `Fault Recovered: ${rule.name}`,
+          message: `${rule.name} auto-recovered on ${device.uid}`,
+          severity: 'info',
+          ref_type: 'alert',
+          ref_id: existingOpen.id,
+        });
+
+        console.log(`[Alert] Auto-recovered: ${rule.name} for ${device.uid}`);
+      }
+    }
+  }
+
+  // If LED hardware fault is active, suppress cascading generic rule duplicate alerts
+  if (ledFaultActive) {
+    if (matchedRules.length > 0) {
+      console.log(`[Alert] Suppressed ${matchedRules.length} generic rule alert(s) for ${device.uid} due to active hardware LED fault.`);
+    }
+    return;
+  }
+
+  // If no rules matched, finish
+  if (matchedRules.length === 0) {
+    return;
+  }
+
+  // ── 3. SINGLE ALERT GENERATION: SELECT ONLY HIGHEST PRIORITY MATCH ────────
+  // Sort matching rules: Highest Severity first -> Most Specific Scope first -> Lowest Rule ID
+  matchedRules.sort((a, b) => {
+    const sevA = SEVERITY_WEIGHT[a.severity] || 1;
+    const sevB = SEVERITY_WEIGHT[b.severity] || 1;
+    if (sevB !== sevA) return sevB - sevA;
+
+    const scopeA = SCOPE_WEIGHT[a.scope_type] || 0;
+    const scopeB = SCOPE_WEIGHT[b.scope_type] || 0;
+    if (scopeB !== scopeA) return scopeB - scopeA;
+
+    return a.id - b.id;
+  });
+
+  const topRule = matchedRules[0];
+
+  // Check if an open alert of equal or higher severity already exists for this device
+  const existingDeviceAlert = await Alert.findOne({
+    where: {
+      device_id: device.id,
+      status: { [Op.in]: ['open', 'acknowledged', 'assigned', 'in_progress'] },
+    },
+    order: [['detected_at', 'DESC']],
+  });
+
+  if (existingDeviceAlert) {
+    // If open alert for this exact rule already exists, don't re-create
+    if (existingDeviceAlert.rule_id === topRule.id) {
+      return;
+    }
+    // If existing alert is already open with equal or higher severity, suppress additional alerts
+    const existingSevWeight = SEVERITY_WEIGHT[existingDeviceAlert.severity] || 1;
+    const topRuleSevWeight = SEVERITY_WEIGHT[topRule.severity] || 1;
+    if (existingSevWeight >= topRuleSevWeight) {
+      return;
+    }
+  }
+
+  // Create the single prioritized alert
+  const alert = await Alert.create({
+    device_id: device.id,
+    rule_id: topRule.id,
+    alert_type: topRule.alert_type || topRule.name.toLowerCase().replace(/\s+/g, '_'),
+    severity: topRule.severity,
+    status: 'open',
+    message: `${topRule.name} on device ${device.uid} (${device.name || ''})`,
+    voltage_at_alert: telemetry.voltage,
+    current_at_alert: telemetry.current,
+    power_at_alert: telemetry.real_power,
+    detected_at: new Date(),
+  });
+
+  // Notification
+  await Notification.create({
+    type: 'alert',
+    title: topRule.name,
+    message: `${topRule.name} detected on ${device.uid} - ${device.name || ''}`,
+    severity: topRule.severity,
+    ref_type: 'alert',
+    ref_id: alert.id,
+  });
+
+  // Email
+  if (topRule.action_send_email && topRule.email_recipients) {
+    const recipients = topRule.email_recipients.split(',').map(e => e.trim());
+    await sendAlertEmail({ device, alert, recipients });
+  }
+
+  // Auto-create ticket (only if no open ticket already exists for this device)
+  if (topRule.action_create_ticket) {
+    const existingTicket = await MaintenanceTicket.findOne({
+      where: {
+        device_id: device.id,
+        status: { [Op.in]: ['open', 'assigned', 'in_progress'] },
+      },
+    });
+
+    if (!existingTicket) {
+      const ticketNum = `TKT-${Date.now()}`;
+      await MaintenanceTicket.create({
+        ticket_number: ticketNum,
+        device_id: device.id,
+        alert_id: alert.id,
+        title: `Auto: ${topRule.name} - ${device.uid}`,
+        description: `Automatically created from prioritized alert rule: ${topRule.name} (Scope: ${topRule.scope_type || 'global'})`,
+        problem_type: topRule.alert_type || 'fault',
+        priority: topRule.severity === 'critical' ? 'critical' : topRule.severity === 'major' ? 'high' : 'medium',
+        status: 'open',
+      });
+    }
+  }
+
+  console.log(`[Alert] Created prioritized single alert: ${topRule.name} (${topRule.severity}) for ${device.uid} (evaluated ${matchedRules.length} matching rules)`);
 }
 
 function evaluateCondition(rule, telemetry, device) {
