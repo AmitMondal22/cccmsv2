@@ -19,7 +19,7 @@ import {
   Calendar, FileText, AlertTriangle, Plus, Eye, Radio, Sparkles,
   Sliders, SlidersHorizontal, Save, RotateCcw, Undo2, BarChart3,
   BrainCircuit, Repeat, ClipboardList, X, AlertCircle, UploadCloud,
-  ArrowUpCircle, Layers, Cpu, Check
+  ArrowUpCircle, Layers, Cpu, Check, Languages
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -99,6 +99,12 @@ export default function DeviceDetail() {
   });
   const [submittingFwRelease, setSubmittingFwRelease] = useState(false);
   const [fwToast, setFwToast] = useState(null);
+
+  // Alert Resolution Modal State (Full Multilingual UTF-8 Support)
+  const [resolveModal, setResolveModal] = useState(false);
+  const [selectedAlertToResolve, setSelectedAlertToResolve] = useState(null);
+  const [resolutionNotes, setResolutionNotes] = useState('');
+  const [resolvingAlert, setResolvingAlert] = useState(false);
 
   const showFwToast = (text, isErr = false) => {
     setFwToast({ text, isErr });
@@ -362,11 +368,27 @@ export default function DeviceDetail() {
     fetchAlerts();
   };
 
-  const handleResolveAlert = async (alertId) => {
-    const notes = prompt('Enter resolution notes:');
-    if (!notes) return;
-    await resolveAlert(alertId, notes);
-    fetchAlerts();
+  const handleOpenResolveModal = (alertObj) => {
+    setSelectedAlertToResolve(alertObj);
+    setResolutionNotes('');
+    setResolveModal(true);
+  };
+
+  const handleConfirmResolveAlert = async (e) => {
+    if (e) e.preventDefault();
+    if (!selectedAlertToResolve) return;
+    setResolvingAlert(true);
+    try {
+      const notes = resolutionNotes.trim() || 'Resolved by operator';
+      await resolveAlert(selectedAlertToResolve.id, { notes });
+      setResolveModal(false);
+      setSelectedAlertToResolve(null);
+      setResolutionNotes('');
+      fetchAlerts();
+    } catch (err) {
+      console.error('Failed to resolve alert:', err);
+    }
+    setResolvingAlert(false);
   };
 
   // Create Maintenance Ticket
@@ -883,7 +905,7 @@ export default function DeviceDetail() {
                           </button>
                         )}
                         {a.status !== 'resolved' && a.status !== 'closed' && (
-                          <button className="btn btn-primary btn-sm" onClick={() => handleResolveAlert(a.id)}>
+                          <button className="btn btn-primary btn-sm" onClick={() => handleOpenResolveModal(a)}>
                             Resolve
                           </button>
                         )}
@@ -1688,6 +1710,129 @@ export default function DeviceDetail() {
                 disabled={submittingFwRelease || flashingFw}
               >
                 {submittingFwRelease || flashingFw ? 'Publishing & Flashing...' : 'Publish & Flash OTA'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── Multilingual Alert Resolution Modal ── */}
+      {resolveModal && selectedAlertToResolve && (
+        <Modal
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <CheckCircle2 size={18} color="#22c55e" />
+              <span>Resolve Incident #{selectedAlertToResolve.id}</span>
+            </div>
+          }
+          onClose={() => { setResolveModal(false); setSelectedAlertToResolve(null); }}
+        >
+          <form onSubmit={handleConfirmResolveAlert}>
+            {/* Alert Context Summary */}
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              padding: '12px 14px',
+              marginBottom: 14
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontWeight: 600, fontSize: 13, textTransform: 'capitalize', color: 'var(--text-primary)' }}>
+                  {selectedAlertToResolve.alert_type?.replace(/_/g, ' ')}
+                </span>
+                <StatusBadge value={selectedAlertToResolve.severity} type="severity" />
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                {selectedAlertToResolve.message}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                Detected: {new Date(selectedAlertToResolve.detected_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+              </div>
+            </div>
+
+            {/* Multilingual Support Banner */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              background: 'rgba(59, 130, 246, 0.08)',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              borderRadius: 6,
+              padding: '8px 12px',
+              fontSize: 11,
+              color: '#93c5fd',
+              marginBottom: 14
+            }}>
+              <Languages size={16} style={{ flexShrink: 0 }} />
+              <div>
+                <strong>All Languages Supported (UTF-8 Unicode):</strong> Type in हिन्दी, বাংলা, தமிழ், मराठी, ગુજરાતી, English, etc.
+              </div>
+            </div>
+
+            {/* Quick Resolution Preset Chips */}
+            <div style={{ marginBottom: 12 }}>
+              <label className="form-label" style={{ fontSize: 11, marginBottom: 6, display: 'block' }}>
+                Quick Resolution Presets (क्विक चयन):
+              </label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {[
+                  { label: '✅ Lamp Replaced', hi: 'बल्ब बदला गया', text: 'Lamp Replaced / नया बल्ब लगाया गया' },
+                  { label: '⚡ Voltage Restored', hi: 'वोल्टेज सामान्य', text: 'Line Voltage Restored / बिजली बहाल की गई' },
+                  { label: '🔧 Driver Fixed', hi: 'ड्राइवर मरम्मत', text: 'LED Driver / SMPS Repaired / ड्राइवर ठीक किया गया' },
+                  { label: '🔌 Wiring Fixed', hi: 'तार कनेक्शन ठीक', text: 'Wiring / Cable Fault Restored / केबल ठीक की गई' },
+                  { label: '👁️ Field Inspection', hi: 'जांच पूर्ण', text: 'Field Inspection Completed - Device Normal / निरीक्षण पूर्ण' },
+                  { label: '🌧️ Weather Cleared', hi: 'मौसम सामान्य', text: 'Weather Condition Cleared / मौसम जनित समस्या समाप्त' },
+                ].map((preset, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{
+                      fontSize: 11,
+                      padding: '4px 8px',
+                      borderRadius: 14,
+                      background: resolutionNotes === preset.text ? 'rgba(59, 130, 246, 0.25)' : undefined,
+                      borderColor: resolutionNotes === preset.text ? '#3b82f6' : undefined,
+                    }}
+                    onClick={() => setResolutionNotes(preset.text)}
+                  >
+                    {preset.label} <span style={{ opacity: 0.65, fontSize: 10, marginLeft: 2 }}>({preset.hi})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Multilingual Text Input */}
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label" style={{ fontSize: 11, display: 'flex', justifyContent: 'space-between' }}>
+                <span>Resolution Notes / समाधान विवरण *</span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Any language / script</span>
+              </label>
+              <textarea
+                className="form-input"
+                rows={3}
+                required
+                placeholder="Enter resolution notes in any language (उदा. बल्ब बदल दिया गया है / Lamp replaced by technician)..."
+                value={resolutionNotes}
+                onChange={e => setResolutionNotes(e.target.value)}
+                style={{ resize: 'vertical' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => { setResolveModal(false); setSelectedAlertToResolve(null); }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                disabled={resolvingAlert || !resolutionNotes.trim()}
+              >
+                {resolvingAlert ? 'Resolving...' : 'Resolve Alert'}
               </button>
             </div>
           </form>
