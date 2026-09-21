@@ -1,4 +1,8 @@
 import 'dotenv/config';
+
+// Enforce Indian Standard Time globally across all server operations & logs
+process.env.TZ = 'Asia/Kolkata';
+
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';

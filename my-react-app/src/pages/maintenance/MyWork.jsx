@@ -68,7 +68,7 @@ export default function MyWork() {
                     <td>{t.device?.uid} - {t.device?.name}</td>
                     <td>{t.title}</td>
                     <td><StatusBadge value={t.status} type="ticketStatus" /></td>
-                    <td>{new Date(t.created_at).toLocaleDateString()}</td>
+                    <td>{new Date(t.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</td>
                     <td>
                       {t.status !== 'resolved' && t.status !== 'closed' && (
                         <button className="btn btn-primary btn-sm" onClick={() => handleResolve(t.id)}>

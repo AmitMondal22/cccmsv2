@@ -120,7 +120,7 @@ export default async function energyRoutes(fastify, opts) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().split('T')[0];
-      const dayName = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      const dayName = d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', month: 'short', day: 'numeric' });
       
       // Typical evening/night schedule ~ 11.5 hours
       const baseConsumption = 120 + Math.sin(i * 0.8) * 15 + (Math.random() * 8 - 4);
