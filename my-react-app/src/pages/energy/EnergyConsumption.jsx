@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Zap, TrendingDown, DollarSign, Leaf, Gauge, Clock,
-  Calendar, Building2, MapPin, Globe, Search, RefreshCw, BarChart2
+  Calendar, Building2, MapPin, Globe, Search, RefreshCw, BarChart2, Download, CheckCircle2, Layers
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar,
@@ -11,7 +11,7 @@ import { getEnergySummary, getEnergyTrend, getZoneEnergyBreakdown, getDeviceWise
 import { getCities, getZones, getWards } from '../../api/organization.api.js';
 import StatusBadge from '../../components/common/StatusBadge.jsx';
 
-const COLORS = ['#4f8ef7', '#10b981', '#f59e0b', '#a855f7', '#ec4899', '#06b6d4'];
+const COLORS = ['#38bdf8', '#22c55e', '#f97316', '#a855f7', '#ec4899', '#06b6d4', '#eab308'];
 
 export default function EnergyConsumption() {
   const [summary, setSummary] = useState(null);
@@ -53,7 +53,7 @@ export default function EnergyConsumption() {
         getEnergySummary(filterParams),
         getEnergyTrend({ days: 7 }),
         getZoneEnergyBreakdown(),
-        getDeviceWiseEnergy({ ...filterParams, search, page, limit: 25 }),
+        getDeviceWiseEnergy({ ...filterParams, search, page, limit: 50 }),
       ]);
 
       setSummary(sumRes.data || null);
@@ -85,6 +85,42 @@ export default function EnergyConsumption() {
     return wards.filter(w => String(w.zone_id) === String(selectedZone));
   }, [wards, selectedZone]);
 
+  // Export CSV of Device Energy Records
+  const exportCSV = () => {
+    if (!deviceRows.length) {
+      alert('No device energy data available to export');
+      return;
+    }
+    const headers = ['UID', 'Device Name', 'Zone', 'Ward', 'Status', 'Light', 'Power (W)', 'Demand (kW)', 'PF', 'Total kWh', '150W Baseline', 'Saved kWh', 'Savings %', 'Cost INR', 'Cost Saved INR', 'Burn Hrs'];
+    const rows = deviceRows.map(d => [
+      d.uid,
+      `"${d.name}"`,
+      `"${d.zone}"`,
+      `"${d.ward}"`,
+      d.connectivity_status,
+      d.light_status,
+      d.real_power,
+      d.demandKw,
+      d.pf,
+      d.kwh,
+      d.baselineKwh,
+      d.savedKwh,
+      d.savingsPercent,
+      d.costInr,
+      d.costSavedInr,
+      d.run_hours,
+    ]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `energy_analytics_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div>
       {/* Page Header */}
@@ -92,16 +128,21 @@ export default function EnergyConsumption() {
         <div>
           <h1 className="page-title">Energy Consumption & Demand Analytics</h1>
           <p className="page-subtitle">
-            Real-time kW peak demand, cumulative kWh consumption, and LED vs Sodium savings calculations
+            Real-time kW peak demand, cumulative kWh consumption, and LED vs Sodium savings calculations (IST)
           </p>
         </div>
-        <button className="btn btn-secondary" onClick={fetchData} disabled={loading}>
-          <RefreshCw size={14} className={loading ? 'pulse' : ''} /> Refresh Analytics
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-primary" onClick={exportCSV}>
+            <Download size={14} /> Export CSV
+          </button>
+          <button className="btn btn-secondary" onClick={fetchData} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh Analytics
+          </button>
+        </div>
       </div>
 
       {/* ── Hierarchy Filter Bar ── */}
-      <div className="hierarchy-filter-bar">
+      <div className="hierarchy-filter-bar" style={{ marginBottom: 20 }}>
         <div>
           <label className="form-label">City</label>
           <select
@@ -140,16 +181,16 @@ export default function EnergyConsumption() {
       </div>
 
       {/* ── Demand & Consumption KPI Summary Cards ── */}
-      <div className="kpi-grid">
+      <div className="kpi-grid" style={{ marginBottom: 24 }}>
         {/* Active Energy (kWh) */}
         <div className="kpi-card">
-          <div className="kpi-card-icon" style={{ background: 'rgba(79,142,247,0.15)', color: '#4f8ef7' }}>
+          <div className="kpi-card-icon" style={{ background: 'rgba(56,189,248,0.15)', color: '#38bdf8' }}>
             <Zap size={18} />
           </div>
-          <div className="kpi-card-value">{summary?.totalKwh ?? '0.00'}</div>
-          <div className="kpi-card-label">Active Consumption (kWh)</div>
+          <div className="kpi-card-value">{summary?.totalKwh ?? '0.00'} <span style={{ fontSize: 13 }}>kWh</span></div>
+          <div className="kpi-card-label">Active Consumption</div>
           <div className="kpi-card-sub" style={{ color: 'var(--text-muted)' }}>
-            Tariff ₹7.50 / kWh: <strong>₹{summary?.totalCostInr ?? '0'}</strong>
+            Tariff ₹7.50 / kWh: <strong style={{ color: 'var(--text-primary)' }}>₹{summary?.totalCostInr ?? '0.00'}</strong>
           </div>
         </div>
 
@@ -158,10 +199,10 @@ export default function EnergyConsumption() {
           <div className="kpi-card-icon" style={{ background: 'rgba(249,115,22,0.15)', color: '#f97316' }}>
             <Gauge size={18} />
           </div>
-          <div className="kpi-card-value">{summary?.peakDemandKw ?? '0.00'} <span style={{ fontSize: 14 }}>kW</span></div>
-          <div className="kpi-card-label">Peak Demand (kW)</div>
+          <div className="kpi-card-value">{summary?.peakDemandKw ?? '0.000'} <span style={{ fontSize: 13 }}>kW</span></div>
+          <div className="kpi-card-label">Connected Peak Capacity</div>
           <div className="kpi-card-sub" style={{ color: '#22c55e' }}>
-            Active Load: {summary?.currentActiveDemandKw ?? '0'} kW
+            Active Load: {summary?.currentActiveDemandKw ?? '0.000'} kW
           </div>
         </div>
 
@@ -171,9 +212,9 @@ export default function EnergyConsumption() {
             <TrendingDown size={18} />
           </div>
           <div className="kpi-card-value" style={{ color: '#22c55e' }}>
-            {summary?.savedKwh ?? '0.00'} <span style={{ fontSize: 14 }}>kWh</span>
+            {summary?.savedKwh ?? '0.00'} <span style={{ fontSize: 13 }}>kWh</span>
           </div>
-          <div className="kpi-card-label">Energy Saved ({summary?.savingsPercent ?? '62.5'}%)</div>
+          <div className="kpi-card-label">Energy Saved ({summary?.savingsPercent ?? '60'}%)</div>
           <div className="kpi-card-sub" style={{ color: '#22c55e' }}>
             vs Conventional 150W HPS Baseline
           </div>
@@ -185,7 +226,7 @@ export default function EnergyConsumption() {
             <DollarSign size={18} />
           </div>
           <div className="kpi-card-value" style={{ color: '#a855f7' }}>
-            ₹{summary?.costSavedInr ?? '0'}
+            ₹{summary?.costSavedInr ?? '0.00'}
           </div>
           <div className="kpi-card-label">Cost Saved (INR)</div>
           <div className="kpi-card-sub" style={{ color: 'var(--text-secondary)' }}>
@@ -199,11 +240,11 @@ export default function EnergyConsumption() {
             <Leaf size={18} />
           </div>
           <div className="kpi-card-value" style={{ color: '#10b981' }}>
-            {summary?.co2SavedKg ?? '0'} <span style={{ fontSize: 14 }}>kg</span>
+            {summary?.co2SavedKg ?? '0.00'} <span style={{ fontSize: 13 }}>kg</span>
           </div>
           <div className="kpi-card-label">CO2 Emissions Avoided</div>
           <div className="kpi-card-sub">
-            @ 0.82 kg CO2 / kWh green factor
+            @ 0.82 kg CO2 / kWh factor
           </div>
         </div>
 
@@ -215,7 +256,7 @@ export default function EnergyConsumption() {
           <div className="kpi-card-value">{summary?.avgPowerFactor ?? '0.98'}</div>
           <div className="kpi-card-label">Avg Power Factor</div>
           <div className="kpi-card-sub">
-            Avg Burn Time: {summary?.avgBurnHours ?? '0'} hrs/day
+            Avg Burn Time: {summary?.avgBurnHours ?? '0.0'} hrs
           </div>
         </div>
       </div>
@@ -235,8 +276,8 @@ export default function EnergyConsumption() {
               <AreaChart data={trend.hourlyProfile} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="demandGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4f8ef7" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#4f8ef7" stopOpacity={0.0}/>
+                    <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="#38bdf8" stopOpacity={0.0}/>
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} />
@@ -246,7 +287,7 @@ export default function EnergyConsumption() {
                   contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
                   formatter={(value, name) => [`${value} kW`, 'Peak Demand']}
                 />
-                <Area type="monotone" dataKey="demandKw" stroke="#4f8ef7" strokeWidth={2.5} fillOpacity={1} fill="url(#demandGrad)" />
+                <Area type="monotone" dataKey="demandKw" stroke="#38bdf8" strokeWidth={2.5} fillOpacity={1} fill="url(#demandGrad)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -271,12 +312,37 @@ export default function EnergyConsumption() {
                 />
                 <Legend wrapperStyle={{ fontSize: 12, paddingTop: 6 }} />
                 <Bar dataKey="consumptionKwh" name="CCMS LED (kWh)" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="savedKwh" name="Energy Saved (kWh)" fill="#4f8ef7" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="savedKwh" name="Energy Saved (kWh)" fill="#38bdf8" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
       </div>
+
+      {/* ── Zone Energy Breakdown Chart (if zones exist) ── */}
+      {zoneBreakdown.length > 0 && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div className="card-header">
+            <div>
+              <div className="card-title">Zone-Wise Energy Distribution & Demand (kWh & kW)</div>
+              <div className="card-subtitle">Aggregated consumption and load per operational zone</div>
+            </div>
+          </div>
+          <div style={{ padding: '16px 20px', height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={zoneBreakdown} margin={{ top: 10, right: 10, left: -10, bottom: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} />
+                <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={11} />
+                <YAxis stroke="var(--text-muted)" fontSize={11} />
+                <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 12, paddingTop: 6 }} />
+                <Bar dataKey="totalKwh" name="Total Consumption (kWh)" fill="#a855f7" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="savedKwh" name="Energy Saved (kWh)" fill="#22c55e" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {/* ── Individual Device-Wise Energy Consumption Table ── */}
       <div className="card">
@@ -320,39 +386,40 @@ export default function EnergyConsumption() {
               </tr>
             </thead>
             <tbody>
-              {deviceRows.length === 0 && (
+              {deviceRows.length === 0 ? (
                 <tr>
                   <td colSpan={15} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
                     No device energy records found.
                   </td>
                 </tr>
+              ) : (
+                deviceRows.map(d => (
+                  <tr key={d.id}>
+                    <td style={{ fontWeight: 700, color: 'var(--brand)' }}>{d.uid}</td>
+                    <td>{d.name}</td>
+                    <td>
+                      <div style={{ fontSize: 12 }}>{d.zone}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{d.ward}</div>
+                    </td>
+                    <td><StatusBadge value={d.connectivity_status} type="connectivity" /></td>
+                    <td><StatusBadge value={d.light_status} type="light" /></td>
+                    <td style={{ fontWeight: 600, color: '#f97316' }}>{d.real_power} W</td>
+                    <td style={{ fontWeight: 600 }}>{d.demandKw} kW</td>
+                    <td className="dim">{d.pf}</td>
+                    <td style={{ fontWeight: 700, color: '#a855f7' }}>{d.kwh}</td>
+                    <td className="dim">{d.baselineKwh}</td>
+                    <td style={{ color: '#22c55e', fontWeight: 600 }}>{d.savedKwh}</td>
+                    <td>
+                      <span className="badge badge-online">
+                        {d.savingsPercent}%
+                      </span>
+                    </td>
+                    <td className="dim">₹{d.costInr}</td>
+                    <td style={{ color: '#22c55e', fontWeight: 600 }}>₹{d.costSavedInr}</td>
+                    <td className="dim">{d.run_hours} h</td>
+                  </tr>
+                ))
               )}
-              {deviceRows.map(d => (
-                <tr key={d.id}>
-                  <td style={{ fontWeight: 700, color: 'var(--brand)' }}>{d.uid}</td>
-                  <td>{d.name}</td>
-                  <td>
-                    <div style={{ fontSize: 12 }}>{d.zone}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{d.ward}</div>
-                  </td>
-                  <td><StatusBadge value={d.connectivity_status} type="connectivity" /></td>
-                  <td><StatusBadge value={d.light_status} type="light" /></td>
-                  <td style={{ fontWeight: 600, color: '#f97316' }}>{d.real_power} W</td>
-                  <td style={{ fontWeight: 600 }}>{d.demandKw} kW</td>
-                  <td className="dim">{d.pf}</td>
-                  <td style={{ fontWeight: 700, color: '#a855f7' }}>{d.kwh}</td>
-                  <td className="dim">{d.baselineKwh}</td>
-                  <td style={{ color: '#22c55e', fontWeight: 600 }}>{d.savedKwh}</td>
-                  <td>
-                    <span className="badge badge-online">
-                      {d.savingsPercent}%
-                    </span>
-                  </td>
-                  <td className="dim">₹{d.costInr}</td>
-                  <td style={{ color: '#22c55e', fontWeight: 600 }}>₹{d.costSavedInr}</td>
-                  <td className="dim">{d.run_hours} h</td>
-                </tr>
-              ))}
             </tbody>
           </table>
         </div>
