@@ -4,7 +4,8 @@ import { getDevices } from '../../api/device.api.js';
 import { getUsers } from '../../api/user.api.js';
 import StatusBadge from '../../components/common/StatusBadge.jsx';
 import Modal from '../../components/common/Modal.jsx';
-import { Plus, RefreshCw, Wrench } from 'lucide-react';
+import { Plus, RefreshCw, Wrench, UserCheck } from 'lucide-react';
+import { formatISTDate, formatISTDateTime } from '../../utils/date.js';
 
 const STATUS_COLS = [
   { key: 'open',        label: 'Open',        color: '#ef4444' },
@@ -15,8 +16,8 @@ const STATUS_COLS = [
 ];
 
 const defaultForm = {
-  device_id: '', title: '', description: '', problem_type: '',
-  priority: 'medium', status: 'open', assigned_team: '', due_date: '',
+  device_id: '', title: '', description: '', problem_type: 'luminaire_outage',
+  priority: 'medium', status: 'open', assigned_to: '', assigned_team: '', due_date: '',
 };
 
 export default function Tickets() {
@@ -47,7 +48,7 @@ export default function Tickets() {
   useEffect(() => {
     (async () => {
       try {
-        const [dRes, uRes] = await Promise.all([getDevices({ limit: 100 }), getUsers()]);
+        const [dRes, uRes] = await Promise.all([getDevices({ limit: 200 }), getUsers()]);
         setDevices(dRes.data.data || []);
         setUsers(uRes.data || []);
       } catch {}
@@ -55,13 +56,22 @@ export default function Tickets() {
   }, []);
 
   const handleSave = async () => {
+    if (!form.device_id || !form.title.trim()) return;
     setSaving(true);
     try {
-      await createTicket(form);
+      const payload = {
+        ...form,
+        device_id: parseInt(form.device_id),
+        assigned_to: form.assigned_to ? parseInt(form.assigned_to) : null,
+        due_date: form.due_date ? form.due_date : null,
+      };
+      await createTicket(payload);
       setModal(false);
       setForm(defaultForm);
       fetch();
-    } catch {}
+    } catch (e) {
+      console.error('Failed to create ticket', e);
+    }
     setSaving(false);
   };
 
@@ -129,7 +139,7 @@ export default function Tickets() {
               )}
               {tickets.map(t => (
                 <tr key={t.id}>
-                  <td style={{ color: 'var(--brand)', fontWeight: 600, fontSize: 12 }}>{t.ticket_number}</td>
+                  <td style={{ color: 'var(--brand)', fontWeight: 700, fontSize: 12 }}>{t.ticket_number}</td>
                   <td><span style={{ fontWeight: 600 }}>{t.device?.uid || '—'}</span><br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t.device?.name}</span></td>
                   <td style={{ fontSize: 11 }}>
                     {[t.device?.street?.ward?.zone?.name, t.device?.street?.ward?.name, t.device?.street?.name].filter(Boolean).join(' / ') || '—'}
@@ -138,7 +148,7 @@ export default function Tickets() {
                   <td><StatusBadge value={t.priority} type="priority" /></td>
                   <td><StatusBadge value={t.status} type="ticket_status" /></td>
                   <td className="dim">{t.assignedTechnician?.name || '—'}</td>
-                  <td className="dim">{t.due_date || '—'}</td>
+                  <td className="dim">{t.due_date ? formatISTDate(t.due_date) : '—'}</td>
                   <td>
                     <select
                       className="form-select"
@@ -171,7 +181,7 @@ export default function Tickets() {
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleSave} disabled={saving || !form.device_id}>
+            <button className="btn btn-primary" onClick={handleSave} disabled={saving || !form.device_id || !form.title.trim()}>
               {saving ? 'Creating...' : 'Create Ticket'}
             </button>
           </>
@@ -194,20 +204,36 @@ export default function Tickets() {
         </div>
         <div className="form-group">
           <label className="form-label">Title *</label>
-          <input className="form-input" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="e.g. Light not working" />
+          <input className="form-input" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="e.g. Luminaire Outage / Driver Replacement" />
         </div>
-        <div className="form-group">
-          <label className="form-label">Problem Type</label>
-          <input className="form-input" value={form.problem_type} onChange={e => setForm(p => ({ ...p, problem_type: e.target.value }))} placeholder="e.g. light_failure" />
+        <div className="form-grid">
+          <div className="form-group">
+            <label className="form-label">Problem Type</label>
+            <select className="form-select" value={form.problem_type} onChange={e => setForm(p => ({ ...p, problem_type: e.target.value }))}>
+              <option value="luminaire_outage">Luminaire Outage / Load Drop</option>
+              <option value="undervoltage_fault">Under-Voltage Trip</option>
+              <option value="overvoltage_fault">Over-Voltage Trip</option>
+              <option value="power_factor_degradation">Low Power Factor / Capacitor Wear</option>
+              <option value="physical_damage">Physical / Pole Damage</option>
+              <option value="general_maintenance">General Inspection</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Assign Technician</label>
+            <select className="form-select" value={form.assigned_to} onChange={e => setForm(p => ({ ...p, assigned_to: e.target.value }))}>
+              <option value="">Select Technician...</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+            </select>
+          </div>
         </div>
         <div className="form-group">
           <label className="form-label">Description</label>
-          <textarea className="form-textarea" value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="Describe the issue..." />
+          <textarea className="form-textarea" value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="Describe the physical observation or electrical readings..." />
         </div>
         <div className="form-grid">
           <div className="form-group">
             <label className="form-label">Assigned Team</label>
-            <input className="form-input" value={form.assigned_team} onChange={e => setForm(p => ({ ...p, assigned_team: e.target.value }))} placeholder="Maintenance Team A" />
+            <input className="form-input" value={form.assigned_team} onChange={e => setForm(p => ({ ...p, assigned_team: e.target.value }))} placeholder="Field Operations Team A" />
           </div>
           <div className="form-group">
             <label className="form-label">Due Date</label>
@@ -218,3 +244,4 @@ export default function Tickets() {
     </div>
   );
 }
+

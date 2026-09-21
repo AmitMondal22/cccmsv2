@@ -373,8 +373,8 @@ export default function DeviceDetail() {
         {[
           { label: 'Voltage',      value: s?.voltage,    unit: 'V',   color: '#38bdf8', sub: 'Safe (190-255V)' },
           { label: 'Current',      value: s?.current,    unit: 'A',   color: '#22c55e', sub: 'Load Current' },
-          { label: 'Active Power', value: s?.real_power, unit: 'W',   color: '#f97316', sub: '60W Luminaire' },
-          { label: 'Power Factor', value: s?.pf,         unit: '',    color: '#a855f7', sub: 'Min Target 0.85' },
+          { label: 'Active Power', value: s?.real_power, unit: 'W',   color: '#f97316', sub: '' },
+          { label: 'Power Factor', value: s?.pf,         unit: '',    color: '#a855f7', sub: '' },
           { label: 'Grid Freq',    value: s?.frequency,  unit: 'Hz',  color: '#38bdf8', sub: 'Nominal 50Hz' },
           { label: 'Cumulative Energy', value: s?.kwh,   unit: 'kWh', color: '#f59e0b', sub: 'Total Consumption' },
           { label: 'Burn Hours',   value: s?.run_hours,  unit: 'h',   color: '#ec4899', sub: 'Lifetime Operation' },

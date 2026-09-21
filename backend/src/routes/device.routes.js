@@ -246,17 +246,83 @@ export default async function deviceRoutes(fastify, opts) {
 
   // POST /api/devices — create device
   fastify.post('/', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const device = await Device.create(request.body);
-    await DeviceLatestState.create({ device_id: device.id });
-    return reply.status(201).send(device);
+    try {
+      const {
+        uid, name, serial_number, street_id, latitude, longitude,
+        device_model, rated_voltage, rated_power, firmware_version,
+      } = request.body || {};
+
+      if (!uid || typeof uid !== 'string' || !uid.trim()) {
+        return reply.status(400).send({ error: 'Device UID is required' });
+      }
+
+      const cleanUid = uid.trim().toUpperCase();
+
+      // Check duplicate UID
+      const existing = await Device.findOne({ where: { uid: cleanUid } });
+      if (existing) {
+        return reply.status(400).send({ error: `Device with UID '${cleanUid}' already exists` });
+      }
+
+      const device = await Device.create({
+        uid: cleanUid,
+        name: name ? name.trim() : `StreetLight-${cleanUid}`,
+        serial_number: serial_number ? serial_number.trim() : `SN-${cleanUid}`,
+        street_id: street_id ? parseInt(street_id) : null,
+        latitude: latitude ? parseFloat(latitude) : 22.5535,
+        longitude: longitude ? parseFloat(longitude) : 88.3518,
+        device_model: device_model || 'TLX-3000',
+        firmware_version: firmware_version || '2.1.0',
+        rated_voltage: rated_voltage ? parseFloat(rated_voltage) : 230,
+        rated_power: rated_power ? parseFloat(rated_power) : 60,
+        status: 'active',
+        connectivity_status: 'offline',
+        light_status: 'off',
+        health_status: 'normal',
+      });
+
+      await DeviceLatestState.create({
+        device_id: device.id,
+        voltage: 0,
+        current: 0,
+        real_power: 0,
+        pf: 0,
+        kwh: 0,
+        run_hours: 0,
+        frequency: 50.00,
+        light_status: 0,
+        relay_status: 0,
+        fault: 0,
+        packets_today: 0,
+        packets_total: 0,
+      });
+
+      const fullDevice = await Device.findByPk(device.id, {
+        include: [
+          {
+            model: Street, as: 'street',
+            include: [{ model: Ward, as: 'ward', include: [{ model: Zone, as: 'zone', include: [{ model: City, as: 'city' }] }] }],
+          },
+          { model: DeviceLatestState, as: 'latestState' },
+        ],
+      });
+
+      return reply.status(201).send(fullDevice);
+    } catch (err) {
+      return reply.status(500).send({ error: err.message });
+    }
   });
 
   // PUT /api/devices/:id
   fastify.put('/:id', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const device = await Device.findByPk(request.params.id);
-    if (!device) return reply.status(404).send({ error: 'Not found' });
-    await device.update(request.body);
-    return device;
+    try {
+      const device = await Device.findByPk(request.params.id);
+      if (!device) return reply.status(404).send({ error: 'Device not found' });
+      await device.update(request.body);
+      return device;
+    } catch (err) {
+      return reply.status(500).send({ error: err.message });
+    }
   });
 
   // DELETE /api/devices/:id

@@ -65,41 +65,117 @@ export default async function maintenanceRoutes(fastify, opts) {
 
   // POST /api/maintenance/tickets
   fastify.post('/tickets', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const ticketNum = `TKT-${Date.now()}`;
-    const ticket = await MaintenanceTicket.create({
-      ...request.body,
-      ticket_number: ticketNum,
-      created_by: request.user.id,
-    });
-    return reply.status(201).send(ticket);
+    try {
+      const {
+        device_id, alert_id, assigned_to, title, description,
+        problem_type, priority = 'medium', status = 'open',
+        assigned_team, due_date,
+      } = request.body || {};
+
+      if (!title || !title.trim()) {
+        return reply.status(400).send({ error: 'Ticket title is required' });
+      }
+
+      const ticketNum = `TKT-${Date.now().toString().slice(-6)}`;
+      
+      // Sanitize due_date to avoid invalid date syntax in PostgreSQL
+      let cleanDueDate = null;
+      if (due_date && typeof due_date === 'string' && due_date.trim()) {
+        const parsed = new Date(due_date);
+        if (!isNaN(parsed.getTime())) {
+          cleanDueDate = parsed;
+        }
+      }
+
+      const ticket = await MaintenanceTicket.create({
+        ticket_number: ticketNum,
+        device_id: device_id ? parseInt(device_id) : null,
+        alert_id: alert_id ? parseInt(alert_id) : null,
+        assigned_to: assigned_to ? parseInt(assigned_to) : null,
+        title: title.trim(),
+        description: description ? description.trim() : '',
+        problem_type: problem_type ? problem_type.trim() : 'general_maintenance',
+        priority,
+        status: status || 'open',
+        assigned_team: assigned_team ? assigned_team.trim() : '',
+        due_date: cleanDueDate,
+        created_by: request.user?.id || null,
+      });
+
+      const fullTicket = await MaintenanceTicket.findByPk(ticket.id, {
+        include: [
+          { model: Device, as: 'device', include: deviceInclude },
+          { model: Alert, as: 'alert' },
+          { model: User, as: 'assignedTechnician', attributes: ['id', 'name', 'email', 'phone'] },
+        ],
+      });
+
+      return reply.status(201).send(fullTicket);
+    } catch (err) {
+      return reply.status(500).send({ error: err.message });
+    }
   });
 
   // PUT /api/maintenance/tickets/:id
   fastify.put('/tickets/:id', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const ticket = await MaintenanceTicket.findByPk(request.params.id);
-    if (!ticket) return reply.status(404).send({ error: 'Not found' });
-    await ticket.update(request.body);
-    return ticket;
+    try {
+      const ticket = await MaintenanceTicket.findByPk(request.params.id);
+      if (!ticket) return reply.status(404).send({ error: 'Ticket not found' });
+
+      const updates = { ...request.body };
+      if (updates.due_date === '' || updates.due_date === null) {
+        updates.due_date = null;
+      } else if (updates.due_date) {
+        const parsed = new Date(updates.due_date);
+        if (!isNaN(parsed.getTime())) {
+          updates.due_date = parsed;
+        } else {
+          delete updates.due_date;
+        }
+      }
+
+      await ticket.update(updates);
+      return ticket;
+    } catch (err) {
+      return reply.status(500).send({ error: err.message });
+    }
   });
 
-  // PUT /api/maintenance/tickets/:id/resolve
-  fastify.put('/tickets/:id/resolve', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const ticket = await MaintenanceTicket.findByPk(request.params.id);
-    if (!ticket) return reply.status(404).send({ error: 'Not found' });
-    await ticket.update({
-      status: 'resolved',
-      resolved_at: new Date(),
-      repair_notes: request.body.repair_notes,
-      diagnosis: request.body.diagnosis,
-    });
-    return ticket;
-  });
+  // PUT / POST / PATCH /api/maintenance/tickets/:id/resolve
+  const handleResolveTicket = async (request, reply) => {
+    try {
+      const ticket = await MaintenanceTicket.findByPk(request.params.id);
+      if (!ticket) return reply.status(404).send({ error: 'Ticket not found' });
+
+      const notes = request.body?.repair_notes || request.body?.notes || (typeof request.body === 'string' ? request.body : 'Resolved by technician');
+      const diagnosis = request.body?.diagnosis || '';
+
+      await ticket.update({
+        status: 'resolved',
+        resolved_at: new Date(),
+        repair_notes: notes,
+        diagnosis,
+      });
+
+      return reply.send(ticket);
+    } catch (err) {
+      return reply.status(500).send({ error: err.message });
+    }
+  };
+
+  fastify.put('/tickets/:id/resolve', { preHandler: [fastify.authenticate] }, handleResolveTicket);
+  fastify.post('/tickets/:id/resolve', { preHandler: [fastify.authenticate] }, handleResolveTicket);
+  fastify.patch('/tickets/:id/resolve', { preHandler: [fastify.authenticate] }, handleResolveTicket);
 
   // PUT /api/maintenance/tickets/:id/close
   fastify.put('/tickets/:id/close', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const ticket = await MaintenanceTicket.findByPk(request.params.id);
-    if (!ticket) return reply.status(404).send({ error: 'Not found' });
-    await ticket.update({ status: 'closed', closed_at: new Date() });
-    return ticket;
+    try {
+      const ticket = await MaintenanceTicket.findByPk(request.params.id);
+      if (!ticket) return reply.status(404).send({ error: 'Ticket not found' });
+      await ticket.update({ status: 'closed', closed_at: new Date() });
+      return ticket;
+    } catch (err) {
+      return reply.status(500).send({ error: err.message });
+    }
   });
 }

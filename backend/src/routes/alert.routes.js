@@ -134,24 +134,40 @@ export default async function alertRoutes(fastify, opts) {
     return alert;
   });
 
-  // PUT /api/alerts/:id/resolve
-  fastify.put('/:id/resolve', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const alert = await Alert.findByPk(request.params.id);
-    if (!alert) return reply.status(404).send({ error: 'Not found' });
-    await alert.update({
-      status: 'resolved',
-      resolved_at: new Date(),
-      resolution_notes: request.body.notes || 'Resolved by operator',
-    });
-    return alert;
-  });
+  // PUT / POST / PATCH /api/alerts/:id/resolve
+  const handleResolveAlert = async (request, reply) => {
+    try {
+      const alert = await Alert.findByPk(request.params.id);
+      if (!alert) return reply.status(404).send({ error: 'Alert not found' });
+
+      const notes = request.body?.notes || request.body?.resolution_notes || (typeof request.body === 'string' ? request.body : 'Resolved by operator');
+
+      await alert.update({
+        status: 'resolved',
+        resolved_at: new Date(),
+        resolution_notes: notes,
+      });
+
+      return reply.send(alert);
+    } catch (err) {
+      return reply.status(500).send({ error: err.message });
+    }
+  };
+
+  fastify.put('/:id/resolve', { preHandler: [fastify.authenticate] }, handleResolveAlert);
+  fastify.post('/:id/resolve', { preHandler: [fastify.authenticate] }, handleResolveAlert);
+  fastify.patch('/:id/resolve', { preHandler: [fastify.authenticate] }, handleResolveAlert);
 
   // PUT /api/alerts/:id/close
   fastify.put('/:id/close', { preHandler: [fastify.authenticate] }, async (request, reply) => {
-    const alert = await Alert.findByPk(request.params.id);
-    if (!alert) return reply.status(404).send({ error: 'Not found' });
-    await alert.update({ status: 'closed', closed_at: new Date() });
-    return alert;
+    try {
+      const alert = await Alert.findByPk(request.params.id);
+      if (!alert) return reply.status(404).send({ error: 'Alert not found' });
+      await alert.update({ status: 'closed', closed_at: new Date() });
+      return alert;
+    } catch (err) {
+      return reply.status(500).send({ error: err.message });
+    }
   });
 
   // ── Alert Rules ──────────────────────────────────────────────────
