@@ -7,6 +7,10 @@ const Device = sequelize.define('Device', {
   name: { type: DataTypes.STRING(200), allowNull: false },
   serial_number: { type: DataTypes.STRING(100) },
   street_id: { type: DataTypes.INTEGER },
+  // Optional FK to DCU — null for normal street devices, set for CCMS-network devices
+  dcu_id: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+  // Phase mapping for devices under CCMS / DCU: 'R', 'Y', or 'B'
+  phase: { type: DataTypes.STRING(10), allowNull: true, defaultValue: null },
   latitude: { type: DataTypes.DECIMAL(10, 6) },
   longitude: { type: DataTypes.DECIMAL(10, 6) },
   installation_date: { type: DataTypes.DATEONLY },

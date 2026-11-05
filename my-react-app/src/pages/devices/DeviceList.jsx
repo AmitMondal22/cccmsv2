@@ -1,20 +1,43 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { getDevices, createDevice } from '../../api/device.api.js';
 import { getCities, getZones, getWards, getStreets } from '../../api/organization.api.js';
 import DataTable from '../../components/common/DataTable.jsx';
 import StatusBadge from '../../components/common/StatusBadge.jsx';
 import Modal from '../../components/common/Modal.jsx';
-import { Search, RefreshCw, Plus, Globe, Building2, MapPin, Route, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Search, RefreshCw, Plus, Globe, Building2, MapPin, Route, CheckCircle2, AlertTriangle, Layers, Network, Cpu, Zap, Activity } from 'lucide-react';
 import { timeAgo } from '../../utils/date.js';
 
 const columns = [
-  { key: 'uid',     label: 'UID',    render: (v) => <span style={{ color: 'var(--brand)', fontWeight: 700 }}>{v}</span> },
+  { key: 'uid',     label: 'UID',    render: (v) => <span style={{ color: 'var(--brand)', fontWeight: 700, fontFamily: 'monospace' }}>{v}</span> },
   { key: 'name',    label: 'Device Name' },
-  { key: '_city',   label: 'City',   render: (_, r) => r.street?.ward?.zone?.city?.name || '—', sortable: false },
-  { key: '_zone',   label: 'Zone',   render: (_, r) => r.street?.ward?.zone?.name || '—', sortable: false },
-  { key: '_ward',   label: 'Ward',   render: (_, r) => r.street?.ward?.name || '—', sortable: false },
-  { key: '_street', label: 'Street', render: (_, r) => r.street?.name || '—', sortable: false },
+  {
+    key: '_hierarchy', label: 'Asset Hierarchy',
+    render: (_, r) => {
+      if (r.dcu) {
+        const phaseColor = r.phase === 'R' ? '#ef4444' : r.phase === 'Y' ? '#f59e0b' : '#3b82f6';
+        return (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span className="badge badge-info" style={{ fontSize: 10, padding: '1px 5px', fontWeight: 700 }}>CCMS</span>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>{r.dcu.ccms?.name || 'CCMS Feeder'}</span>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              {r.dcu.name} {r.phase && <span style={{ color: phaseColor, fontWeight: 700 }}>• Phase {r.phase}</span>}
+            </div>
+          </div>
+        );
+      }
+      return (
+        <div>
+          <span className="badge" style={{ fontSize: 10, padding: '1px 5px', background: 'rgba(107, 114, 128, 0.18)', color: '#9ca3af' }}>NORMAL</span>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>{r.street?.name || 'Independent Street'}</div>
+        </div>
+      );
+    },
+    sortable: false
+  },
+  { key: '_city',   label: 'City / Ward', render: (_, r) => `${r.dcu?.ccms?.ward?.zone?.city?.name || r.street?.ward?.zone?.city?.name || 'Kolkata'} (${r.dcu?.ccms?.ward?.name || r.street?.ward?.name || '—'})`, sortable: false },
   {
     key: 'connectivity_status', label: 'Conn.',
     render: (v) => <StatusBadge value={v} type="connectivity" />,
@@ -62,12 +85,17 @@ const initialDeviceForm = {
 
 export default function DeviceList() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialHierarchy = searchParams.get('hierarchy') || 'all';
+
   const [data, setData] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [hierarchyFilter, setHierarchyFilter] = useState(initialHierarchy);
+  const [phaseFilter, setPhaseFilter] = useState('all');
   const [filters, setFilters] = useState({
     connectivity_status: '',
     light_status: '',
@@ -105,6 +133,8 @@ export default function DeviceList() {
     setLoading(true);
     try {
       const params = { page: p, limit: 50, ...(search && { search }) };
+      if (hierarchyFilter !== 'all') params.hierarchy = hierarchyFilter;
+      if (phaseFilter !== 'all') params.phase = phaseFilter;
       Object.entries(filters).forEach(([k, v]) => v && (params[k] = v));
       const res = await getDevices(params);
       setData(res.data.data || []);
@@ -121,7 +151,21 @@ export default function DeviceList() {
   useEffect(() => {
     const t = setTimeout(() => fetchDevices(1), 300);
     return () => clearTimeout(t);
-  }, [search, filters]);
+  }, [search, filters, hierarchyFilter, phaseFilter]);
+
+  // Sync with searchParams
+  useEffect(() => {
+    const h = searchParams.get('hierarchy');
+    if (h && h !== hierarchyFilter) {
+      setHierarchyFilter(h);
+    }
+  }, [searchParams]);
+
+  // Summary counts
+  const normalCount = useMemo(() => data.filter(d => !d.dcu_id).length, [data]);
+  const ccmsCount = useMemo(() => data.filter(d => !!d.dcu_id).length, [data]);
+  const onlineCount = useMemo(() => data.filter(d => d.connectivity_status === 'online').length, [data]);
+  const faultCount = useMemo(() => data.filter(d => d.health_status === 'fault' || d.health_status === 'warning').length, [data]);
 
   // Filtered dropdowns for modal
   const modalZones = useMemo(() => {
@@ -188,12 +232,22 @@ export default function DeviceList() {
 
   const handlePage = (p) => { setPage(p); fetchDevices(p); };
 
+  const handleSelectHierarchyTab = (tab) => {
+    setHierarchyFilter(tab);
+    if (tab === 'all') {
+      searchParams.delete('hierarchy');
+    } else {
+      searchParams.set('hierarchy', tab);
+    }
+    setSearchParams(searchParams);
+  };
+
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">All Devices</h1>
-          <p className="page-subtitle">{total.toLocaleString()} devices registered</p>
+          <h1 className="page-title">All Monitoring Devices</h1>
+          <p className="page-subtitle">Unified global registry combining Normal Monitoring &amp; CCMS Controlled Networks</p>
         </div>
         <div className="page-actions">
           <button className="btn btn-secondary" onClick={() => fetchDevices()}><RefreshCw size={14} /> Refresh</button>
@@ -201,13 +255,83 @@ export default function DeviceList() {
         </div>
       </div>
 
+      {/* Stats Summary Strip */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 18 }}>
+        <div className="card" style={{ padding: '12px 16px', borderLeft: '3px solid var(--brand)' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Total Registered</div>
+          <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>{total.toLocaleString()}</div>
+        </div>
+        <div className="card" style={{ padding: '12px 16px', borderLeft: '3px solid #6b7280' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Hierarchy A (Normal)</div>
+          <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4, color: '#9ca3af' }}>{normalCount}</div>
+        </div>
+        <div className="card" style={{ padding: '12px 16px', borderLeft: '3px solid #6366f1' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Hierarchy B (CCMS Network)</div>
+          <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4, color: '#6366f1' }}>{ccmsCount}</div>
+        </div>
+        <div className="card" style={{ padding: '12px 16px', borderLeft: '3px solid #10b981' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Online Status</div>
+          <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4, color: '#10b981' }}>{onlineCount}</div>
+        </div>
+        <div className="card" style={{ padding: '12px 16px', borderLeft: '3px solid #ef4444' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Active Faults</div>
+          <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4, color: '#ef4444' }}>{faultCount}</div>
+        </div>
+      </div>
+
+      {/* Asset Hierarchy & Phase Filter Tabs */}
+      <div className="tab-bar" style={{ marginBottom: 14 }}>
+        <button
+          className={`tab-btn ${hierarchyFilter === 'all' && phaseFilter === 'all' ? 'active' : ''}`}
+          onClick={() => { handleSelectHierarchyTab('all'); setPhaseFilter('all'); }}
+        >
+          <Layers size={14} style={{ marginRight: 6 }} /> All Devices
+        </button>
+        <button
+          className={`tab-btn ${hierarchyFilter === 'normal' ? 'active' : ''}`}
+          onClick={() => { handleSelectHierarchyTab('normal'); setPhaseFilter('all'); }}
+        >
+          <Cpu size={14} style={{ marginRight: 6 }} /> Hierarchy A: Normal Devices
+        </button>
+        <button
+          className={`tab-btn ${hierarchyFilter === 'ccms' && phaseFilter === 'all' ? 'active' : ''}`}
+          onClick={() => { handleSelectHierarchyTab('ccms'); setPhaseFilter('all'); }}
+        >
+          <Network size={14} style={{ marginRight: 6 }} /> Hierarchy B: CCMS Network
+        </button>
+        <button
+          className={`tab-btn ${phaseFilter === 'R' ? 'active' : ''}`}
+          onClick={() => { setPhaseFilter('R'); setHierarchyFilter('ccms'); }}
+          style={{ color: phaseFilter === 'R' ? '#ef4444' : undefined }}
+        >
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', display: 'inline-block', marginRight: 6 }} />
+          Phase R
+        </button>
+        <button
+          className={`tab-btn ${phaseFilter === 'Y' ? 'active' : ''}`}
+          onClick={() => { setPhaseFilter('Y'); setHierarchyFilter('ccms'); }}
+          style={{ color: phaseFilter === 'Y' ? '#f59e0b' : undefined }}
+        >
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b', display: 'inline-block', marginRight: 6 }} />
+          Phase Y
+        </button>
+        <button
+          className={`tab-btn ${phaseFilter === 'B' ? 'active' : ''}`}
+          onClick={() => { setPhaseFilter('B'); setHierarchyFilter('ccms'); }}
+          style={{ color: phaseFilter === 'B' ? '#3b82f6' : undefined }}
+        >
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#3b82f6', display: 'inline-block', marginRight: 6 }} />
+          Phase B
+        </button>
+      </div>
+
       {/* Toolbar */}
       <div className="toolbar">
-        <div className="search-wrap">
+        <div className="search-wrap" style={{ flex: 1 }}>
           <Search size={14} />
           <input
             className="search-input"
-            placeholder="Search by UID, name, serial..."
+            placeholder="Unified search: UID (e.g. TS00000002), Name, CCMS UID, DCU UID, Street, Ward, Phase..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -241,7 +365,7 @@ export default function DeviceList() {
         limit={50}
         onPageChange={handlePage}
         onRowClick={(row) => navigate(`/devices/${row.id}`)}
-        emptyText="No devices match your filters"
+        emptyText="No devices match your search or filter criteria"
       />
 
       {/* ── Add Device Modal ── */}

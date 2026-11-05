@@ -31,6 +31,8 @@ const routeLabels = {
   '/admin/users': 'Users',
   '/admin/audit': 'Audit Logs',
   '/admin/settings': 'Settings',
+  '/ccms': 'CCMS Stations',
+  '/dcu': 'DCU Units',
 };
 
 export default function Header({ onToggleSidebar, onAlertCountChange }) {

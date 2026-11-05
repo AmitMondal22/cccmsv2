@@ -16,6 +16,10 @@ import Notification from './Notification.js';
 import FirmwareRelease from './FirmwareRelease.js';
 import FotaCampaign from './FotaCampaign.js';
 import FotaDeviceJob from './FotaDeviceJob.js';
+// ── CCMS Network ─────────────────────────────────────────────────
+import CCMS from './CCMS.js';
+import DCU from './DCU.js';
+import CcmsTelemetry from './CcmsTelemetry.js';
 
 // ─── Organization Hierarchy ────────────────────────────────────
 Project.hasMany(City, { foreignKey: 'project_id', as: 'cities' });
@@ -76,6 +80,19 @@ FotaDeviceJob.belongsTo(FotaCampaign, { foreignKey: 'campaign_id', as: 'campaign
 Device.hasMany(FotaDeviceJob, { foreignKey: 'device_id', as: 'fotaJobs' });
 FotaDeviceJob.belongsTo(Device, { foreignKey: 'device_id', as: 'device' });
 
+// ─── CCMS Network Hierarchy ────────────────────────────────────
+Ward.hasMany(CCMS, { foreignKey: 'ward_id', as: 'ccmsUnits' });
+CCMS.belongsTo(Ward, { foreignKey: 'ward_id', as: 'ward' });
+
+CCMS.hasMany(DCU, { foreignKey: 'ccms_id', as: 'dcus' });
+DCU.belongsTo(CCMS, { foreignKey: 'ccms_id', as: 'ccms' });
+
+DCU.hasMany(Device, { foreignKey: 'dcu_id', as: 'dcuDevices', constraints: false });
+Device.belongsTo(DCU, { foreignKey: 'dcu_id', as: 'dcu', constraints: false });
+
+CCMS.hasMany(CcmsTelemetry, { foreignKey: 'ccms_id', as: 'telemetry' });
+CcmsTelemetry.belongsTo(CCMS, { foreignKey: 'ccms_id', as: 'ccms' });
+
 export {
   sequelize,
   Project,
@@ -95,4 +112,8 @@ export {
   FirmwareRelease,
   FotaCampaign,
   FotaDeviceJob,
+  // CCMS Network
+  CCMS,
+  DCU,
+  CcmsTelemetry,
 };

@@ -27,6 +27,10 @@ import Cities from './pages/organization/Cities.jsx';
 import Zones from './pages/organization/Zones.jsx';
 import Wards from './pages/organization/Wards.jsx';
 import Streets from './pages/organization/Streets.jsx';
+import CCMSList from './pages/ccms/CCMSList.jsx';
+import CCMSDetail from './pages/ccms/CCMSDetail.jsx';
+import DCUList from './pages/dcu/DCUList.jsx';
+import DCUDetail from './pages/dcu/DCUDetail.jsx';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -68,6 +72,12 @@ function App() {
                 <Route path="org/wards"    element={<Wards />} />
                 <Route path="org/streets"  element={<Streets />} />
 
+                {/* CCMS Network */}
+                <Route path="ccms"     element={<CCMSList />} />
+                <Route path="ccms/:id" element={<CCMSDetail />} />
+                <Route path="dcu"      element={<DCUList />} />
+                <Route path="dcu/:id"  element={<DCUDetail />} />
+
                 {/* Devices */}
                 <Route path="devices" element={<DeviceList />} />
                 <Route path="devices/live" element={<LiveMonitoring />} />
@@ -90,12 +100,17 @@ function App() {
                 <Route path="maintenance/history" element={<MaintenanceHistory />} />
 
                 {/* Reports */}
-                <Route path="reports"        element={<Reports defaultType="telemetry" />} />
-                <Route path="reports/city"   element={<Reports defaultType="city" />} />
-                <Route path="reports/zone"   element={<Reports defaultType="zone" />} />
-                <Route path="reports/ward"   element={<Reports defaultType="ward" />} />
-                <Route path="reports/device" element={<Reports defaultType="device_summary" />} />
-                <Route path="reports/fault"  element={<Reports defaultType="fault" />} />
+                <Route path="reports"             element={<Reports defaultType="telemetry" />} />
+                <Route path="reports/city"        element={<Reports defaultType="city" />} />
+                <Route path="reports/zone"        element={<Reports defaultType="zone" />} />
+                <Route path="reports/ward"        element={<Reports defaultType="ward" />} />
+                <Route path="reports/ccms"        element={<Reports defaultType="ccms" />} />
+                <Route path="reports/dcu"         element={<Reports defaultType="dcu" />} />
+                <Route path="reports/device"      element={<Reports defaultType="device_summary" />} />
+                <Route path="reports/energy"      element={<Reports defaultType="energy" />} />
+                <Route path="reports/billing"     element={<Reports defaultType="billing" />} />
+                <Route path="reports/fault"       element={<Reports defaultType="fault" />} />
+                <Route path="reports/maintenance" element={<Reports defaultType="maintenance" />} />
 
                 {/* Administration */}
                 <Route path="admin/users"    element={<Users />} />

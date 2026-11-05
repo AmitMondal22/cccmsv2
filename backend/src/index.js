@@ -34,6 +34,8 @@ import notificationRoutes from './routes/notification.routes.js';
 import reportRoutes from './routes/report.routes.js';
 import energyRoutes from './routes/energy.routes.js';
 import fotaRoutes from './routes/fota.routes.js';
+import ccmsRoutes from './routes/ccms.routes.js';
+import dcuRoutes  from './routes/dcu.routes.js';
 
 const fastify = Fastify({
   logger: {
@@ -93,6 +95,8 @@ await fastify.register(notificationRoutes, { prefix: '/api/notifications' });
 await fastify.register(reportRoutes, { prefix: '/api/reports' });
 await fastify.register(energyRoutes, { prefix: '/api/energy' });
 await fastify.register(fotaRoutes, { prefix: '/api/fota' });
+await fastify.register(ccmsRoutes, { prefix: '/api/ccms' });
+await fastify.register(dcuRoutes, { prefix: '/api/dcu' });
 
 // Health check
 fastify.get('/api/health', async () => ({

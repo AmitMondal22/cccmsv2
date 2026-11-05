@@ -447,12 +447,20 @@ export default function DeviceDetail() {
   if (!device) return <div className="empty-state">Device not found</div>;
 
   const s = device.latestState;
-  const streetPath = [
+  const isCcmsHierarchy = !!device.dcu;
+  const streetPath = isCcmsHierarchy ? [
+    device.dcu?.ccms?.ward?.zone?.city?.name || device.street?.ward?.zone?.city?.name,
+    device.dcu?.ccms?.ward?.zone?.name || device.street?.ward?.zone?.name,
+    device.dcu?.ccms?.ward?.name || device.street?.ward?.name,
+    device.dcu?.ccms?.name,
+    device.dcu?.name,
+    device.phase ? `Phase ${device.phase}` : null,
+  ].filter(Boolean).join(' → ') : [
     device.street?.ward?.zone?.city?.name,
     device.street?.ward?.zone?.name,
     device.street?.ward?.name,
     device.street?.name,
-  ].filter(Boolean).join(' / ');
+  ].filter(Boolean).join(' → ');
 
   const chartData = telemetry.map(t => ({
     time: new Date(t.server_timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),

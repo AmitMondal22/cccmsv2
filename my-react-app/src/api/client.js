@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// Base API URL pointing to https://ccms-api.iotblitz.in/api with fallback/env support
-const RAW_URL = import.meta.env.VITE_API_URL || 'https://ccms-api.iotblitz.in';
+// Base API URL pointing to /api (proxied in Vite dev to backend:3001, or relative in production)
+const RAW_URL = import.meta.env.VITE_API_URL || '/api';
 const API_BASE = RAW_URL.endsWith('/api') ? RAW_URL : `${RAW_URL.replace(/\/+$/, '')}/api`;
 
 const client = axios.create({

@@ -1,4 +1,4 @@
-import { Device, DeviceLatestState, Telemetry, Alert, MaintenanceTicket, Street, Ward, Zone, City, Project } from '../models/index.js';
+import { Device, DeviceLatestState, Telemetry, Alert, MaintenanceTicket, Street, Ward, Zone, City, Project, DCU, CCMS } from '../models/index.js';
 import { Op, fn, col, literal } from 'sequelize';
 import { getResolvedConfig, getSystemDefaults, resetDeviceFaultState } from '../services/faultDetection.service.js';
 
@@ -7,7 +7,7 @@ export default async function deviceRoutes(fastify, opts) {
   fastify.get('/', { preHandler: [fastify.authenticate] }, async (request) => {
     const {
       page = 1, limit = 50, search,
-      city_id, zone_id, ward_id, street_id, project_id,
+      city_id, zone_id, ward_id, street_id, project_id, dcu_id, ccms_id, phase, hierarchy,
       connectivity_status, light_status, health_status, status,
     } = request.query;
 
@@ -16,6 +16,10 @@ export default async function deviceRoutes(fastify, opts) {
     if (connectivity_status) where.connectivity_status = connectivity_status;
     if (light_status) where.light_status = light_status;
     if (health_status) where.health_status = health_status;
+    if (dcu_id) where.dcu_id = dcu_id;
+    if (phase) where.phase = phase;
+    if (hierarchy === 'normal') where.dcu_id = null;
+    if (hierarchy === 'ccms') where.dcu_id = { [Op.ne]: null };
     if (search) {
       where[Op.or] = [
         { uid: { [Op.iLike]: `%${search}%` } },
@@ -66,6 +70,23 @@ export default async function deviceRoutes(fastify, opts) {
             },
           ],
         },
+        {
+          model: DCU,
+          as: 'dcu',
+          include: [
+            {
+              model: CCMS,
+              as: 'ccms',
+              include: [
+                {
+                  model: Ward,
+                  as: 'ward',
+                  include: [{ model: Zone, as: 'zone', include: [{ model: City, as: 'city' }] }],
+                },
+              ],
+            },
+          ],
+        },
         { model: DeviceLatestState, as: 'latestState' },
       ],
       order: [['uid', 'ASC']],
@@ -89,6 +110,23 @@ export default async function deviceRoutes(fastify, opts) {
         {
           model: Street, as: 'street',
           include: [{ model: Ward, as: 'ward', include: [{ model: Zone, as: 'zone', include: [{ model: City, as: 'city', include: [{ model: Project, as: 'project' }] }] }] }],
+        },
+        {
+          model: DCU,
+          as: 'dcu',
+          include: [
+            {
+              model: CCMS,
+              as: 'ccms',
+              include: [
+                {
+                  model: Ward,
+                  as: 'ward',
+                  include: [{ model: Zone, as: 'zone', include: [{ model: City, as: 'city', include: [{ model: Project, as: 'project' }] }] }],
+                },
+              ],
+            },
+          ],
         },
         { model: DeviceLatestState, as: 'latestState' },
       ],

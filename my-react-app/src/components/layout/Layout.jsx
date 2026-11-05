@@ -8,7 +8,7 @@ export default function Layout() {
 
   return (
     <div className="app-layout">
-      <Sidebar collapsed={collapsed} />
+      <Sidebar collapsed={collapsed} onExpand={() => setCollapsed(false)} />
       <div className={`app-main ${collapsed ? 'sidebar-collapsed' : ''}`}>
         <Header onToggleSidebar={() => setCollapsed(p => !p)} />
         <main className="page-content">
