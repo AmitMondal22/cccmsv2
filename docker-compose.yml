@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: techavo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: techavo_ccms
+      POSTGRES_USER: ccms_user
+      POSTGRES_PASSWORD: ccms_pass
+      TZ: Asia/Kolkata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ccms_user -d techavo_ccms"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: techavo-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: techavo_ccms
+      DB_USER: ccms_user
+      DB_PASSWORD: ccms_pass
+      PORT: 3001
+      HOST: 0.0.0.0
+      JWT_SECRET: techavo_super_secret_jwt_key_change_in_production
+      UDP_PORT: 9001
+      FRONTEND_URL: http://localhost:5173
+      TZ: Asia/Kolkata
+    ports:
+      - "3001:3001"
+      - "9001:9001/udp"
+    volumes:
+      - uploads_data:/app/uploads
+
+  frontend:
+    build:
+      context: ./my-react-app
+      dockerfile: Dockerfile
+    container_name: techavo-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+      - "80:80"
+
+volumes:
+  postgres_data:
+  uploads_data:
+

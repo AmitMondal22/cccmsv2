@@ -8,7 +8,8 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "migrate": "node src/db/migrate.js",
-    "seed": "node src/db/seed.js"
+    "seed": "node src/db/seed.js",
+    "test:ipv6": "node src/telemetry/sendTestIpv6.js"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",

@@ -37,24 +37,58 @@ function normalizeAddr(addr) {
   return addr || 'unknown';
 }
 
-/** Print a coloured banner header for each received packet. */
-function printPacketHeader(rinfo, packetNo) {
-  const sender = `${normalizeAddr(rinfo.address)}:${rinfo.port}`;
-  const time   = istNow();
-  console.log(`\n${C.cyan}${'─'.repeat(62)}${C.reset}`);
-  console.log(
-    `${C.bold}${C.cyan} 📡 UDP PACKET #${packetNo}${C.reset}` +
-    `  ${C.dim}${time}${C.reset}` +
-    `  ${C.yellow}from ${sender}${C.reset}`
-  );
-  console.log(`${C.cyan}${'─'.repeat(62)}${C.reset}`);
+/** Detailed address format helper for IPv6 / IPv4 display */
+function formatAddressInfo(rinfo) {
+  const rawAddr = rinfo.address || 'unknown';
+  const isIpv4Mapped = rawAddr.startsWith('::ffff:');
+  const cleanIpv4 = isIpv4Mapped ? rawAddr.slice(7) : null;
+  const isIpv6 = !isIpv4Mapped && rawAddr.includes(':');
+
+  return {
+    rawAddress: rawAddr,
+    family: rinfo.family || (isIpv6 ? 'IPv6' : 'IPv4'),
+    port: rinfo.port,
+    isIpv6,
+    isIpv4Mapped,
+    cleanIpv4,
+    displayString: isIpv6 ? `[${rawAddr}]:${rinfo.port}` : `${cleanIpv4 || rawAddr}:${rinfo.port}`,
+  };
 }
 
-/** Print the raw bytes received (hex + UTF-8 preview). */
+/** Print a coloured banner header for each received packet (IPv6 & IPv4). */
+function printPacketHeader(rinfo, packetNo, buf) {
+  const addrInfo = formatAddressInfo(rinfo);
+  const time = istNow();
+  const protocolBadge = addrInfo.isIpv6
+    ? `${C.bgCyan}${C.bold} IPv6 NATIVE ${C.reset}`
+    : addrInfo.isIpv4Mapped
+    ? `${C.bgGreen}${C.bold} IPv6 DUAL-STACK (IPv4-Mapped) ${C.reset}`
+    : `${C.bgGreen}${C.bold} IPv4 ${C.reset}`;
+
+  console.log(`\n${C.cyan}${'═'.repeat(66)}${C.reset}`);
+  console.log(
+    `${C.bold}${C.cyan} 📡 [IPv6 DATA RECEIVED] PACKET #${packetNo}${C.reset}  ${protocolBadge}` +
+    `  ${C.dim}${time}${C.reset}`
+  );
+  console.log(
+    `  ${C.bold}Source Address :${C.reset} ${C.yellow}${addrInfo.displayString}${C.reset}` +
+    `  ${C.dim}(Family: ${addrInfo.family})${C.reset}`
+  );
+  if (addrInfo.isIpv4Mapped) {
+    console.log(`  ${C.bold}Raw IPv6 Frame :${C.reset} ${C.dim}[${rinfo.address}]:${rinfo.port}${C.reset}`);
+  }
+  console.log(`  ${C.bold}Received Size  :${C.reset} ${C.green}${buf.length} bytes${C.reset}`);
+  console.log(`${C.cyan}${'─'.repeat(66)}${C.reset}`);
+}
+
+/** Print the raw bytes received (UTF-8 preview + HEX dump). */
 function printRaw(buf) {
   const utf8 = buf.toString('utf8').trim();
-  console.log(`${C.dim} RAW (${buf.length} bytes):${C.reset}`);
+  const hex = buf.toString('hex').match(/.{1,2}/g)?.join(' ') || '';
+  console.log(` ${C.bold}${C.white}📦 RAW INCOMING DATA:${C.reset}`);
   console.log(`  ${C.white}${utf8}${C.reset}`);
+  console.log(` ${C.dim}🔍 HEX DUMP (${buf.length} bytes):${C.reset}`);
+  console.log(`  ${C.dim}${hex}${C.reset}`);
 }
 
 /** Print a pretty aligned telemetry table. */
@@ -220,8 +254,8 @@ export function startUDPServer(fastifyInstance = null) {
     packetNo++;
     const raw = msg.toString('utf8').trim();
 
-    // ── Print header + raw ────────────────────────────────────────────────
-    printPacketHeader(rinfo, packetNo);
+    // ── Print header + raw (IPv6 data receive logging) ──
+    printPacketHeader(rinfo, packetNo, msg);
     printRaw(msg);
 
     // ── 1. Parse & Sanitize JSON ──────────────────────────────────────────
@@ -310,7 +344,7 @@ export function startUDPServer(fastifyInstance = null) {
         fault: telemetry.FAULT,
         packet_timestamp: packetTs,
         server_timestamp: now,
-        ipv6_address: normalizeAddr(rinfo.address),
+        ipv6_address: rinfo.address || 'unknown',
         packets_today: prevPacketsToday + 1,
         packets_total: prevPacketsTotal + 1,
         fault_count: telemetry.FAULT === 1 ? (state.fault_count || 0) + 1 : (state.fault_count || 0),
@@ -336,7 +370,7 @@ export function startUDPServer(fastifyInstance = null) {
         relay_status: telemetry.RELAY_STATUS,
         fault: telemetry.FAULT,
         datalog: telemetry.DATALOG,
-        source_ip: normalizeAddr(rinfo.address),
+        source_ip: rinfo.address || 'unknown',
         raw_payload: raw,
       });
 
@@ -361,16 +395,17 @@ export function startUDPServer(fastifyInstance = null) {
   // ── Listening Banner ──────────────────────────────────────────────────────
   udpSocket.on('listening', () => {
     const addr = udpSocket.address();
-    console.log(`\n${C.bold}${C.cyan}${'═'.repeat(62)}${C.reset}`);
-    console.log(`${C.bold}${C.cyan}  📡  CCMS UDP TELEMETRY SERVER STARTED${C.reset}`);
-    console.log(`${C.bold}${C.cyan}${'═'.repeat(62)}${C.reset}`);
-    console.log(`  ${C.bold}Bind Address :${C.reset} ${C.yellow}${addr.address}${C.reset}`);
-    console.log(`  ${C.bold}Port         :${C.reset} ${C.yellow}${addr.port}${C.reset}`);
-    console.log(`  ${C.bold}Socket Type  :${C.reset} ${C.yellow}udp6 (dual-stack IPv4+IPv6)${C.reset}`);
-    console.log(`  ${C.bold}IPv6 Only    :${C.reset} ${C.yellow}false (accepts ::ffff: mapped IPv4)${C.reset}`);
-    console.log(`  ${C.bold}ACK Sending  :${C.reset} ${C.yellow}Disabled (stopped per configuration)${C.reset}`);
-    console.log(`  ${C.bold}Timezone     :${C.reset} ${C.dim}Asia/Kolkata (IST)${C.reset}`);
-    console.log(`${C.bold}${C.cyan}${'═'.repeat(62)}${C.reset}\n`);
+    console.log(`\n${C.bold}${C.cyan}${'═'.repeat(66)}${C.reset}`);
+    console.log(`${C.bold}${C.cyan}  📡  CCMS UDP TELEMETRY SERVER STARTED (IPv6 ENABLED)${C.reset}`);
+    console.log(`${C.bold}${C.cyan}${'═'.repeat(66)}${C.reset}`);
+    console.log(`  ${C.bold}Bind Address    :${C.reset} ${C.yellow}${addr.address}${C.reset} (dual-stack, all interfaces)`);
+    console.log(`  ${C.bold}Port            :${C.reset} ${C.yellow}${addr.port}${C.reset}`);
+    console.log(`  ${C.bold}Socket Protocol :${C.reset} ${C.yellow}UDP (dual-stack udp6)${C.reset}`);
+    console.log(`  ${C.bold}IPv6 Receive    :${C.reset} ${C.green}ENABLED 🟢 (Accepts native IPv6 & IPv4)${C.reset}`);
+    console.log(`  ${C.bold}Data Printing   :${C.reset} ${C.green}ENABLED 🟢 (Headers, UTF-8, HEX, Telemetry)${C.reset}`);
+    console.log(`  ${C.bold}ACK Sending     :${C.reset} ${C.yellow}Disabled (silent ingestion)${C.reset}`);
+    console.log(`  ${C.bold}Timezone        :${C.reset} ${C.dim}Asia/Kolkata (IST)${C.reset}`);
+    console.log(`${C.bold}${C.cyan}${'═'.repeat(66)}${C.reset}\n`);
   });
 
   // Bind to :: (all IPv6 interfaces with ipv6Only:false accepts both IPv4 and IPv6)
